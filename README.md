@@ -31,10 +31,28 @@ synthesized with the Web Audio API, no audio files).
 - [`website/src/index.html`](./website/src/index.html) — the whole page:
   inline CSS and vanilla JS, canvas 2D rendering, Web Audio synthesis. No
   dependencies, no network requests, system fonts only. The only sibling files
-  are the two baked favicon PNGs.
+  are the two baked favicon PNGs and the baked social card.
 - [`website/scripts/build.mjs`](./website/scripts/build.mjs) — copies those
-  three files into `dist/` and refuses to build a page that gained an
-  off-origin reference or lost a favicon.
+  four files into `dist/` and refuses to build a page that gained an
+  off-origin reference or lost a favicon. The `og:` meta tags are the one
+  place the page may name its own origin in full (scrapers ignore relative
+  URLs); any other absolute URL still fails the build.
+- [`website/scripts/make-og.mjs`](./website/scripts/make-og.mjs) — renders
+  [`website/src/og.png`](./website/src/og.png), the 1200×630 social card, in
+  pure seeded Node (`npm run og`). It ports the page's own figure builder and
+  draw pass — with the lump deformation flattened to a clean sphere — frozen
+  at the approved hover moment: a local smolder with gold shards, plus the
+  favicon's wireframe ball as a corner mark. No text is baked in; wording
+  stays in `og:title`/`og:description`. Composition is a client decision
+  (Kristina, 2026-08-20): sphere with the smolder at the upper right, chosen
+  as variant 1 from ten seeded candidates. The constants in the script pin
+  that choice; rerun `npm run og` to reproduce it byte for byte — the script
+  carries its own fixed-Huffman deflate, so the bytes do not depend on the
+  runtime's zlib build. A fingerprint of the page's figure-geometry section
+  is baked into the PNG and re-checked by the tests
+  ([`website/scripts/og-fingerprint.mjs`](./website/scripts/og-fingerprint.mjs)),
+  so reshaping the page's figure without regenerating the card fails the
+  build instead of leaving a stale card in other people's feeds.
 - [`website/worker/index.ts`](./website/worker/index.ts) — the Cloudflare
   Worker that serves `dist/` and attaches the security headers.
 - Audio starts only after a user gesture (browser autoplay policy). The page

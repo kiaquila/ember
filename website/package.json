@@ -12,6 +12,7 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
+    "og": "node scripts/make-og.mjs",
     "serve": "node scripts/serve.mjs",
     "dev": "npm run build && npm run serve",
     "test": "node --test \"tests/*.test.mjs\"",
