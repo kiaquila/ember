@@ -1,0 +1,954 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ember Study — ks-design lab</title>
+<meta name="description" content="An interactive study: a wireframe figure smolders under the cursor, burns down on play, and reassembles — scored by a deep meditative tuning fork.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHN0eWxlPi5pe3N0cm9rZTojMmEyNzIyO2ZpbGw6bm9uZTtzdHJva2Utd2lkdGg6Mi4yO3N0cm9rZS1saW5lY2FwOnJvdW5kO3N0cm9rZS1saW5lam9pbjpyb3VuZDtvcGFjaXR5Oi45Mn0ubntmaWxsOiMyYTI3MjJ9QG1lZGlhIChwcmVmZXJzLWNvbG9yLXNjaGVtZTpkYXJrKXsuaXtzdHJva2U6I2VjZThlMH0ubntmaWxsOiNlY2U4ZTB9fTwvc3R5bGU+PGcgY2xhc3M9ImkiPjxwYXRoIGQ9Ik01NiAzNiA1MCAxNyAzNSA4IDE3IDE0IDkgMzAgMTQgNDggMzAgNTYgNDggNTFaIi8+PHBhdGggZD0iTTUwIDE3IDQyIDI2TTQyIDI2IDU2IDM2TTM1IDggMjYgMjRNMTcgMTQgMjYgMjRNOSAzMCAyMiAzOE0xNCA0OCAyMiAzOE0zMCA1NiAzOCA0Mk00OCA1MSA0NiAzOE00NiAzOCA1NiAzNk0yNiAyNCAzMSAzMU00MiAyNiAzMSAzMU0yMiAzOCAzMSAzMU0zOCA0MiAzMSAzMU00MiAyNiA0NiAzOE0zOCA0MiA0NiAzOE0yNiAyNCAyMiAzOCIvPjwvZz48ZyBjbGFzcz0ibiI+PGNpcmNsZSBjeD0iNTYiIGN5PSIzNiIgcj0iMi4yIi8+PGNpcmNsZSBjeD0iNTAiIGN5PSIxNyIgcj0iMi4yIi8+PGNpcmNsZSBjeD0iMzUiIGN5PSI4IiByPSIyLjIiLz48Y2lyY2xlIGN4PSIxNyIgY3k9IjE0IiByPSIyLjIiLz48Y2lyY2xlIGN4PSI5IiBjeT0iMzAiIHI9IjIuMiIvPjxjaXJjbGUgY3g9IjE0IiBjeT0iNDgiIHI9IjIuMiIvPjxjaXJjbGUgY3g9IjMwIiBjeT0iNTYiIHI9IjIuMiIvPjxjaXJjbGUgY3g9IjQ4IiBjeT0iNTEiIHI9IjIuMiIvPjxjaXJjbGUgY3g9IjI2IiBjeT0iMjQiIHI9IjEuOCIvPjxjaXJjbGUgY3g9IjIyIiBjeT0iMzgiIHI9IjEuOCIvPjxjaXJjbGUgY3g9IjM4IiBjeT0iNDIiIHI9IjEuOCIvPjxjaXJjbGUgY3g9IjQ2IiBjeT0iMzgiIHI9IjEuOCIvPjwvZz48Y2lyY2xlIGN4PSIzMSIgY3k9IjMxIiByPSIzLjQiIGZpbGw9IiNlZGE1NDUiLz48Y2lyY2xlIGN4PSI0MiIgY3k9IjI2IiByPSIyLjMiIGZpbGw9IiNlZGE1NDUiLz48L3N2Zz4=">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<style>
+  :root {
+    --bg: #d8d5cf;
+    --ink: #2a2722;
+    --muted: #807b72;
+    --line: rgba(42, 39, 34, 0.18);
+    --gold: #b07f2f;
+    --gold-dot: #e8a038;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: ui-sans-serif, system-ui, "Helvetica Neue", Arial, sans-serif;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  #scene {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    touch-action: none;
+  }
+  .chrome {
+    position: fixed;
+    left: 0;
+    right: 0;
+    display: flex;
+    pointer-events: none;
+    z-index: 2;
+  }
+  .chrome > * { pointer-events: auto; }
+  .top {
+    top: 0;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 22px 28px;
+  }
+  .tag {
+    font-size: 11px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .tag strong { color: var(--ink); font-weight: 600; }
+  /* The gold dot is decorative, so the wordmark needs a real separator in the
+     accessible name — without it the mark is announced as one word. */
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  /* The dot sits nearer the KS than the DESIGN in a strict 1:2 proportion —
+     0.15em after the S, 0.30em before the D. The tag's 0.22em letter-spacing
+     already pads the left side, so the left margin only trims it back. */
+  .dot {
+    display: inline-block;
+    width: 0.42em;
+    height: 0.42em;
+    border-radius: 50%;
+    background: var(--gold-dot);
+    margin: 0 0.3em 0 -0.07em;
+  }
+  .bottom {
+    bottom: 0;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    padding: 0 20px 18px;
+  }
+  .hint {
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-align: center;
+    transition: opacity 1.2s ease;
+  }
+  .hint.dim { opacity: 0.35; }
+  .controls {
+    display: flex;
+    gap: 14px;
+  }
+  .ctl {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.28);
+    color: var(--ink);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.25s ease, border-color 0.25s ease, transform 0.15s ease;
+    backdrop-filter: blur(4px);
+  }
+  .ctl:hover { background: rgba(255, 255, 255, 0.55); border-color: rgba(42, 39, 34, 0.4); }
+  .ctl:active { transform: scale(0.94); }
+  .ctl:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+  .ctl svg { width: 18px; height: 18px; display: block; }
+  .ctl .alt { display: none; }
+  .ctl.on .main { display: none; }
+  .ctl.on .alt { display: block; }
+  footer {
+    text-align: center;
+    padding-top: 2px;
+  }
+  footer p {
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+  }
+  footer a {
+    color: var(--ink);
+    text-decoration: none;
+    border-bottom: 1px solid var(--line);
+    transition: border-color 0.2s ease, color 0.2s ease;
+  }
+  footer a:hover { border-color: var(--gold); color: var(--gold); }
+  footer a:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  @media (max-width: 560px) {
+    .top { padding: 16px 18px; }
+    .tag { font-size: 10px; letter-spacing: 0.16em; }
+    .hint { font-size: 10px; }
+    .bottom { gap: 12px; padding-bottom: 14px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="scene" aria-label="A dark wireframe figure smoldering with golden embers. Hovering makes it burn locally and recover; play burns it down completely before it reassembles."></canvas>
+
+<header class="chrome top">
+  <span class="tag"><strong>ks<i class="dot" aria-hidden="true"></i><span class="visually-hidden"> </span>design</strong> · lab</span>
+  <span class="tag">study 01 — ember</span>
+</header>
+
+<div class="chrome bottom">
+  <p class="hint" id="hint">hover to smolder — play to burn it down</p>
+  <div class="controls">
+    <button id="playBtn" class="ctl" aria-label="Play the burn cycle" aria-pressed="false" title="Play">
+      <svg class="main" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <polygon points="8 5 19 12 8 19"></polygon>
+      </svg>
+      <svg class="alt" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <rect x="6.5" y="6.5" width="11" height="11" rx="1.5"></rect>
+      </svg>
+    </button>
+    <button id="muteBtn" class="ctl" aria-label="Mute sound" aria-pressed="false" title="Mute">
+      <svg class="main" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" stroke="none"></polygon>
+        <path d="M15.5 8.5a5 5 0 0 1 0 7"></path>
+        <path d="M18.5 5.5a9 9 0 0 1 0 13"></path>
+      </svg>
+      <svg class="alt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" stroke="none"></polygon>
+        <line x1="15" y1="9" x2="21" y2="15"></line>
+        <line x1="21" y1="9" x2="15" y2="15"></line>
+      </svg>
+    </button>
+  </div>
+  <footer>
+    <p>Designed by <a href="https://ks-design.art" rel="author">ks-design</a> · Built with AI workflows</p>
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("scene");
+  var ctx = canvas.getContext("2d");
+  var playBtn = document.getElementById("playBtn");
+  var muteBtn = document.getElementById("muteBtn");
+  var hint = document.getElementById("hint");
+  var reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ---------- scene metrics ----------
+  var W = 0, H = 0, DPR = 1, CX = 0, CY = 0, R = 200;
+  var bgLayer = null;
+
+  // ---------- figure geometry ----------
+  var N = 560;
+  var dirs = [];      // unit directions * lumpy radius (figure space, radius ~1)
+  var depth = [];     // per-frame projected depth shade
+  var px = [], py = [];   // per-frame projected screen positions
+  var edges = [];     // [a, b]
+  var neighbors = [];
+  var burn = [], heat = [], cool = [], glint = [];
+  var igniteAt = [], returnAt = [];
+  var scatter = [];   // per-node scatter offset (screen-space, unitless)
+  var emberPhase = [], emberSpeed = []; // idle smolder flicker
+  var isEmber = [];
+
+  function rnd(min, max) { return min + Math.random() * (max - min); }
+
+  function buildFigure() {
+    dirs = []; edges = []; neighbors = [];
+    var lumps = [];
+    for (var k = 0; k < 5; k++) {
+      lumps.push({
+        ax: rnd(-2.4, 2.4), ay: rnd(-2.4, 2.4), az: rnd(-2.4, 2.4),
+        ph: rnd(0, Math.PI * 2), amp: rnd(0.05, 0.13)
+      });
+    }
+    var golden = Math.PI * (3 - Math.sqrt(5));
+    for (var i = 0; i < N; i++) {
+      var y = 1 - 2 * (i + 0.5) / N;
+      var rr = Math.sqrt(Math.max(0, 1 - y * y));
+      var th = i * golden;
+      var x = Math.cos(th) * rr, z = Math.sin(th) * rr;
+      var rad = 1;
+      for (var l = 0; l < lumps.length; l++) {
+        var lp = lumps[l];
+        rad += lp.amp * Math.sin(lp.ax * x + lp.ay * y + lp.az * z + lp.ph);
+      }
+      // a quarter of the nodes sit inside the shell: tangled inner mass
+      if (i % 4 === 0) rad *= rnd(0.55, 0.85);
+      rad *= rnd(0.96, 1.04);
+      dirs.push([x * rad, y * rad, z * rad]);
+      neighbors.push([]);
+    }
+    // short edges between close nodes
+    var edgeCount = new Array(N).fill(0);
+    var pairs = [];
+    for (var a = 0; a < N; a++) {
+      for (var b = a + 1; b < N; b++) {
+        var dx = dirs[a][0] - dirs[b][0];
+        var dy = dirs[a][1] - dirs[b][1];
+        var dz = dirs[a][2] - dirs[b][2];
+        var d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 < 0.055) pairs.push([d2, a, b]);
+      }
+    }
+    pairs.sort(function (p, q) { return p[0] - q[0]; });
+    for (var p = 0; p < pairs.length; p++) {
+      var pa = pairs[p][1], pb = pairs[p][2];
+      if (edgeCount[pa] >= 4 || edgeCount[pb] >= 4) continue;
+      edges.push([pa, pb]);
+      edgeCount[pa]++; edgeCount[pb]++;
+      neighbors[pa].push(pb); neighbors[pb].push(pa);
+    }
+    // a few long stray threads for the tangled look
+    for (var s = 0; s < N * 0.03; s++) {
+      var sa = (Math.random() * N) | 0, sb = (Math.random() * N) | 0;
+      if (sa !== sb) { edges.push([sa, sb]); neighbors[sa].push(sb); neighbors[sb].push(sa); }
+    }
+
+    burn = new Array(N).fill(0);
+    heat = new Array(N).fill(0);
+    cool = new Array(N).fill(0);
+    glint = new Array(N).fill(0);
+    px = new Array(N).fill(0);
+    py = new Array(N).fill(0);
+    depth = new Array(N).fill(1);
+    igniteAt = []; returnAt = []; scatter = [];
+    isEmber = []; emberPhase = []; emberSpeed = [];
+    for (var n = 0; n < N; n++) {
+      var yy = dirs[n][1]; // -1 top .. +1 bottom after projection flip; use raw
+      igniteAt.push((1 - (yy + 1.3) / 2.6) * 4.0 + rnd(0, 0.6));   // bottom-up wave, ~4.6s
+      var cd = Math.sqrt(dirs[n][0] * dirs[n][0] + yy * yy + dirs[n][2] * dirs[n][2]);
+      returnAt.push(cd * 2.2 + rnd(0, 0.9));                        // center outward
+      scatter.push([rnd(-0.35, 0.35), rnd(-1.1, -0.4)]);
+      var ember = Math.random() < 0.08;
+      isEmber.push(ember);
+      emberPhase.push(rnd(0, Math.PI * 2));
+      emberSpeed.push(rnd(0.4, 1.4));
+    }
+  }
+
+  // ---------- sprites ----------
+  function makeGlow(size, inner, outer) {
+    var c = document.createElement("canvas");
+    c.width = c.height = size;
+    var g = c.getContext("2d");
+    var grad = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    grad.addColorStop(0, inner);
+    grad.addColorStop(0.35, outer);
+    grad.addColorStop(1, "rgba(255,160,60,0)");
+    g.fillStyle = grad;
+    g.fillRect(0, 0, size, size);
+    return c;
+  }
+  var goldGlow = makeGlow(64, "rgba(255,238,200,0.95)", "rgba(255,170,64,0.55)");
+  var orangeGlow = makeGlow(64, "rgba(255,196,120,0.9)", "rgba(240,120,40,0.45)");
+  var smokePuff = (function () {
+    var c = document.createElement("canvas");
+    c.width = c.height = 96;
+    var g = c.getContext("2d");
+    var grad = g.createRadialGradient(48, 48, 0, 48, 48, 48);
+    grad.addColorStop(0, "rgba(244,241,234,0.5)");
+    grad.addColorStop(0.6, "rgba(236,232,224,0.22)");
+    grad.addColorStop(1, "rgba(236,232,224,0)");
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 96, 96);
+    return c;
+  })();
+  var grain = (function () {
+    var c = document.createElement("canvas");
+    c.width = c.height = 160;
+    var g = c.getContext("2d");
+    var img = g.createImageData(160, 160);
+    for (var i = 0; i < img.data.length; i += 4) {
+      var v = (Math.random() * 255) | 0;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+      img.data[i + 3] = 14;
+    }
+    g.putImageData(img, 0, 0);
+    return c;
+  })();
+  var grainPattern = null;
+
+  // ---------- background layer ----------
+  function buildBackground() {
+    bgLayer = document.createElement("canvas");
+    bgLayer.width = Math.ceil(W * DPR);
+    bgLayer.height = Math.ceil(H * DPR);
+    var g = bgLayer.getContext("2d");
+    g.scale(DPR, DPR);
+    var sky = g.createLinearGradient(0, 0, W * 0.3, H);
+    sky.addColorStop(0, "#dedbd5");
+    sky.addColorStop(0.55, "#d6d3cd");
+    sky.addColorStop(1, "#c9c6c0");
+    g.fillStyle = sky;
+    g.fillRect(0, 0, W, H);
+    // soft halo behind the figure
+    var halo = g.createRadialGradient(CX, CY, R * 0.2, CX, CY, R * 1.7);
+    halo.addColorStop(0, "rgba(248,245,238,0.5)");
+    halo.addColorStop(1, "rgba(248,245,238,0)");
+    g.fillStyle = halo;
+    g.fillRect(0, 0, W, H);
+    // concentric rings
+    g.strokeStyle = "rgba(42,39,34,0.055)";
+    g.lineWidth = 1;
+    [1.28, 1.66, 2.12].forEach(function (m) {
+      g.beginPath();
+      g.arc(CX, CY, R * m, 0, Math.PI * 2);
+      g.stroke();
+    });
+    // vignette
+    var vig = g.createRadialGradient(CX, CY, Math.min(W, H) * 0.45, CX, CY, Math.max(W, H) * 0.85);
+    vig.addColorStop(0, "rgba(40,36,30,0)");
+    vig.addColorStop(1, "rgba(40,36,30,0.14)");
+    g.fillStyle = vig;
+    g.fillRect(0, 0, W, H);
+  }
+
+  function resize() {
+    // minimized/hidden windows can report 0×0 — keep the last real layout
+    if (!window.innerWidth || !window.innerHeight) return;
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = Math.ceil(W * DPR);
+    canvas.height = Math.ceil(H * DPR);
+    CX = W / 2;
+    CY = H * 0.44;
+    R = Math.max(110, Math.min(W, H) * 0.27);
+    buildBackground();
+    grainPattern = ctx.createPattern(grain, "repeat");
+  }
+
+  // ---------- audio: deep meditative tuning fork ----------
+  var AC = null, master = null, voicesBus = null, convolver = null, soften = null;
+  var muted = false;
+  var audioUnlocked = false;
+  var resumeEpoch = 0;
+  var lastHoverStrike = -10;
+
+  function ensureAudio() {
+    if (AC) { if (AC.state === "suspended") AC.resume().catch(function () {}); return; }
+    var Ctor = window.AudioContext || window.webkitAudioContext;
+    if (!Ctor) return;
+    AC = new Ctor();
+    master = AC.createGain();
+    master.gain.value = muted ? 0 : 1;
+    master.connect(AC.destination);
+    convolver = AC.createConvolver();
+    var dur = 2.8, len = Math.floor(AC.sampleRate * dur);
+    var buf = AC.createBuffer(2, len, AC.sampleRate);
+    for (var ch = 0; ch < 2; ch++) {
+      var d = buf.getChannelData(ch);
+      for (var i = 0; i < len; i++) {
+        d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.4) * 0.5;
+      }
+    }
+    convolver.buffer = buf;
+    var wet = AC.createGain();
+    wet.gain.value = 0.45;
+    convolver.connect(wet);
+    wet.connect(master);
+    // gentle low-pass rounds the strike into a soft meditative hum
+    soften = AC.createBiquadFilter();
+    soften.type = "lowpass";
+    soften.frequency.value = 900;
+    soften.Q.value = 0.4;
+    soften.connect(master);
+    soften.connect(convolver);
+    freshVoicesBus();
+  }
+
+  function freshVoicesBus() {
+    voicesBus = AC.createGain();
+    voicesBus.connect(soften);
+  }
+
+  // Unlock inside a real user gesture: resume the context and play one
+  // silent sample (iOS needs it to open the output path).
+  function unlockAudio() {
+    ensureAudio();
+    if (!AC || audioUnlocked) return;
+    // Resuming is asynchronous, so the context is still suspended in this
+    // tick: playing the sample now would do nothing and iOS would keep the
+    // output path closed. Both branches stay inside the gesture that called.
+    if (AC.state === "running") playUnlockSample();
+    else AC.resume().then(playUnlockSample).catch(function () {});
+  }
+
+  function playUnlockSample() {
+    if (!AC || audioUnlocked || AC.state !== "running") return;
+    try {
+      var b = AC.createBuffer(1, 1, AC.sampleRate);
+      var src = AC.createBufferSource();
+      src.buffer = b;
+      src.connect(AC.destination);
+      src.start(0);
+      audioUnlocked = true;
+    } catch (e) {}
+  }
+
+  // A tuning-fork strike: near-pure fundamental at 136.1 Hz with a slow
+  // beating detune, a faint octave, and a long exponential tail.
+  function strike(vol, opts) {
+    if (!AC) return;
+    opts = opts || {};
+    // The context is created on the first pointer move and stays suspended
+    // until a gesture resumes it — and resuming is asynchronous, so a strike
+    // issued in the same tick as the Play click would be dropped and the first
+    // burn would be silent. Only the gesture's own strike waits for the resume:
+    // a hover strike queued while suspended would otherwise fire later beside
+    // the Play strike that actually unlocked the audio. The epoch drops a
+    // pending strike that Stop or a newer strike has since superseded.
+    if (AC.state !== "running") {
+      if (!opts.awaitResume) return;
+      var epoch = ++resumeEpoch;
+      AC.resume().then(function () {
+        if (epoch === resumeEpoch && AC.state === "running") emit(vol, opts);
+      }).catch(function () {});
+      return;
+    }
+    emit(vol, opts);
+  }
+
+  function emit(vol, opts) {
+    var f0 = opts.freq || 136.1;
+    var atk = opts.attack || 0.5;
+    var t = AC.currentTime;
+    var partials = [
+      [1.0, 1.0, 10.0],
+      [1.002, 0.45, 9.0],
+      [2.0, 0.08, 3.0],
+      [0.5, 0.18, 7.0]
+    ];
+    for (var i = 0; i < partials.length; i++) {
+      var ratio = partials[i][0], amp = partials[i][1], dec = partials[i][2];
+      var o = AC.createOscillator();
+      o.type = "sine";
+      o.frequency.value = f0 * ratio;
+      var g = AC.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(Math.max(0.0002, vol * amp * 0.22), t + atk);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + atk + dec);
+      o.connect(g);
+      g.connect(voicesBus);
+      o.start(t);
+      o.stop(t + atk + dec + 0.1);
+    }
+  }
+
+  function duckVoices() {
+    if (!AC || !voicesBus) return;
+    // Cancels a strike still waiting on resume, so stopping cannot be followed
+    // by a tone that was queued a moment earlier.
+    resumeEpoch++;
+    var t = AC.currentTime;
+    var old = voicesBus;
+    old.gain.cancelScheduledValues(t);
+    old.gain.setValueAtTime(old.gain.value, t);
+    old.gain.linearRampToValueAtTime(0.0001, t + 0.7);
+    setTimeout(function () { try { old.disconnect(); } catch (e) {} }, 1200);
+    freshVoicesBus();
+  }
+
+  function setMuted(m) {
+    muted = m;
+    muteBtn.classList.toggle("on", m);
+    muteBtn.setAttribute("aria-pressed", String(m));
+    muteBtn.setAttribute("aria-label", m ? "Unmute sound" : "Mute sound");
+    muteBtn.title = m ? "Unmute" : "Mute";
+    if (AC && master) {
+      master.gain.setTargetAtTime(m ? 0 : 1, AC.currentTime, 0.08);
+    }
+  }
+
+  // ---------- interaction & play state ----------
+  var playing = false;
+  var phase = "idle"; // idle | burning | gone | restoring | calm
+  var phaseT = 0;
+  var pointerX = -1e4, pointerY = -1e4, pointerOn = false;
+
+  function setPhase(p) { phase = p; phaseT = 0; }
+
+  function startPlay() {
+    playing = true;
+    playBtn.classList.add("on");
+    playBtn.setAttribute("aria-pressed", "true");
+    playBtn.setAttribute("aria-label", "Stop the burn cycle");
+    playBtn.title = "Stop";
+    unlockAudio();
+    setPhase("burning");
+    strike(1.0, { attack: 0.6, awaitResume: true });
+    hint.classList.add("dim");
+  }
+
+  function stopPlay() {
+    playing = false;
+    playBtn.classList.remove("on");
+    playBtn.setAttribute("aria-pressed", "false");
+    playBtn.setAttribute("aria-label", "Play the burn cycle");
+    playBtn.title = "Play";
+    duckVoices();
+    var anyBurn = false;
+    for (var i = 0; i < N; i++) if (burn[i] > 0.02) { anyBurn = true; break; }
+    setPhase(anyBurn ? "restoring" : "idle");
+  }
+
+  playBtn.addEventListener("click", function () {
+    if (playing) stopPlay(); else startPlay();
+  });
+  muteBtn.addEventListener("click", function () {
+    unlockAudio();
+    setMuted(!muted);
+  });
+
+  window.addEventListener("pointermove", function (e) {
+    pointerX = e.clientX;
+    pointerY = e.clientY;
+    pointerOn = true;
+    // best effort: on returning visits the browser may allow audio without
+    // a click, so the first hover already gets its strike
+    if (!AC) ensureAudio();
+  });
+  window.addEventListener("pointerdown", function (e) {
+    unlockAudio();
+    pointerX = e.clientX;
+    pointerY = e.clientY;
+    pointerOn = true;
+  });
+  window.addEventListener("pointerleave", function () { pointerOn = false; });
+  window.addEventListener("blur", function () { pointerOn = false; });
+  window.addEventListener("keydown", function () { unlockAudio(); });
+
+  // ---------- particles: sparks & smoke ----------
+  var sparks = [], smokes = [];
+  var MAX_SPARKS = reducedMotion ? 0 : 90;
+  var MAX_SMOKE = reducedMotion ? 0 : 40;
+
+  function spawnSpark(x, y) {
+    if (sparks.length >= MAX_SPARKS) return;
+    var tri = Math.random() < 0.22;
+    sparks.push({
+      x: x, y: y,
+      vx: rnd(-26, 26), vy: rnd(-95, -35),
+      life: 0, ttl: rnd(0.4, 1.1),
+      size: tri ? rnd(2.4, 5) : rnd(0.9, 2.1),
+      tri: tri,
+      rot: rnd(0, Math.PI * 2), rotV: rnd(-4, 4)
+    });
+  }
+
+  function spawnSmoke(x, y) {
+    if (smokes.length >= MAX_SMOKE) return;
+    smokes.push({
+      x: x + rnd(-6, 6), y: y,
+      vx: rnd(-6, 6), vy: rnd(-34, -18),
+      life: 0, ttl: rnd(1.6, 3.2),
+      r0: rnd(10, 22), grow: rnd(14, 26)
+    });
+  }
+
+  // ---------- simulation ----------
+  var rotY = rnd(0, Math.PI * 2);
+  var hoverIgnited = false;
+
+  function simulate(dt, t) {
+    phaseT += dt;
+    rotY += dt * (reducedMotion ? 0 : 0.14);
+    var tilt = reducedMotion ? 0.25 : 0.22 + Math.sin(t * 0.13) * 0.08;
+
+    // project
+    var sy = Math.sin(rotY), cy = Math.cos(rotY);
+    var sx = Math.sin(tilt), cx = Math.cos(tilt);
+    var f = 3.6;
+    for (var i = 0; i < N; i++) {
+      var X = dirs[i][0], Y = dirs[i][1], Z = dirs[i][2];
+      var x1 = X * cy + Z * sy;
+      var z1 = -X * sy + Z * cy;
+      var y2 = Y * cx - z1 * sx;
+      var z2 = Y * sx + z1 * cx;
+      var s = f / (f - z2);
+      var b = burn[i];
+      var be = b * b * (3 - 2 * b); // smoothstep of burn: scatter easing
+      px[i] = CX + (x1 * s + scatter[i][0] * be) * R;
+      py[i] = CY + (y2 * s + scatter[i][1] * be) * R;
+      depth[i] = 0.45 + 0.55 * Math.min(1, Math.max(0, (z2 + 1.2) / 2.2));
+    }
+
+    // hover ignition (works in every phase; harmless while burning)
+    var hoverR = R * 0.34;
+    var hoverHit = false;
+    if (pointerOn) {
+      for (var h = 0; h < N; h++) {
+        if (burn[h] >= 1) continue;
+        var dx = px[h] - pointerX, dy = py[h] - pointerY;
+        if (dx * dx + dy * dy < hoverR * hoverR) {
+          heat[h] = Math.min(1, heat[h] + dt * 3.2);
+          hoverHit = true;
+        }
+      }
+    }
+    if (hoverHit && !hoverIgnited) {
+      hoverIgnited = true;
+      hint.classList.add("dim");
+      if (!playing && t - lastHoverStrike > 4) {
+        lastHoverStrike = t;
+        strike(0.25, { attack: 0.6 });
+      }
+    }
+    if (!hoverHit) hoverIgnited = false;
+
+    // phase-driven full burn
+    if (phase === "burning") {
+      for (var q = 0; q < N; q++) {
+        if (phaseT > igniteAt[q]) heat[q] = Math.min(1, heat[q] + dt * 2.4);
+      }
+      var minB = 1;
+      for (var m = 0; m < N; m++) if (burn[m] < minB) minB = burn[m];
+      if (minB > 0.985 || phaseT > 6.5) setPhase("gone");
+    } else if (phase === "gone") {
+      if (phaseT > 1.4) {
+        setPhase("restoring");
+        strike(0.5, { attack: 0.7 });
+        strike(0.1, { freq: 204.15, attack: 0.8 });
+      }
+    } else if (phase === "restoring") {
+      var maxB = 0;
+      for (var r2 = 0; r2 < N; r2++) {
+        heat[r2] = Math.min(heat[r2], 0.2);
+        if (phaseT > returnAt[r2] && burn[r2] > 0) {
+          burn[r2] = Math.max(0, burn[r2] - dt * 0.55);
+          glint[r2] = Math.min(1, glint[r2] + dt * 4);
+        }
+        if (burn[r2] > maxB) maxB = burn[r2];
+      }
+      if (maxB < 0.02) setPhase(playing ? "calm" : "idle");
+    } else if (phase === "calm") {
+      if (phaseT > 2.4) {
+        if (playing) {
+          setPhase("burning");
+          strike(1.0, { attack: 0.6 });
+        } else {
+          setPhase("idle");
+        }
+      }
+    }
+
+    // fire spread along edges — ash (burned-out nodes) no longer radiates
+    var spread = (phase === "burning") ? 1.3 : 0.25;
+    for (var e = 0; e < edges.length; e++) {
+      var ea = edges[e][0], eb = edges[e][1];
+      if (heat[ea] > 0.35 && burn[eb] < 1) heat[eb] = Math.min(1, heat[eb] + dt * spread * heat[ea] * (1 - burn[ea]));
+      if (heat[eb] > 0.35 && burn[ea] < 1) heat[ea] = Math.min(1, heat[ea] + dt * spread * heat[eb] * (1 - burn[eb]));
+    }
+
+    // heat → charring, cooling → recovery
+    var burnRate = (phase === "burning") ? 1.8 : 0.6;
+    var decay = Math.exp(-dt * ((phase === "burning") ? 0.15 : 1.1));
+    for (var n2 = 0; n2 < N; n2++) {
+      if (heat[n2] > 0.25 && phase !== "restoring") {
+        var drive = (heat[n2] - 0.25) / 0.75;
+        burn[n2] = Math.min(1, burn[n2] + dt * burnRate * drive);
+      }
+      heat[n2] *= decay;
+      if (burn[n2] >= 1 && phase !== "burning") heat[n2] = 0;
+      if (heat[n2] < 0.001) heat[n2] = 0;
+      glint[n2] = Math.max(0, glint[n2] - dt * 1.6);
+
+      // self-recovery outside the play cycle
+      if (phase === "idle" || phase === "calm") {
+        if (heat[n2] < 0.12) {
+          cool[n2] += dt;
+          if (cool[n2] > 0.9 && burn[n2] > 0) {
+            burn[n2] = Math.max(0, burn[n2] - dt * 0.5);
+            glint[n2] = Math.min(1, glint[n2] + dt * 3);
+          }
+        } else {
+          cool[n2] = 0;
+        }
+      }
+    }
+
+    // sparks / smoke emission
+    if (!reducedMotion) {
+      for (var s2 = 0; s2 < N; s2++) {
+        var rh = renderHeat(s2, t);
+        if (rh > 0.45 && burn[s2] < 0.97 && Math.random() < dt * 1.6 * rh) {
+          spawnSpark(px[s2], py[s2]);
+        }
+        if (rh > 0.3 && burn[s2] < 0.97 && Math.random() < dt * 0.4 * rh) {
+          spawnSmoke(px[s2], py[s2]);
+        }
+      }
+    }
+
+    // advance sparks
+    for (var sp = sparks.length - 1; sp >= 0; sp--) {
+      var k = sparks[sp];
+      k.life += dt;
+      if (k.life > k.ttl) { sparks.splice(sp, 1); continue; }
+      k.vy -= 14 * dt;
+      k.vx += Math.sin((t + k.rot) * 7) * 18 * dt;
+      k.x += k.vx * dt;
+      k.y += k.vy * dt;
+      k.rot += k.rotV * dt;
+    }
+    // advance smoke
+    for (var sm = smokes.length - 1; sm >= 0; sm--) {
+      var u = smokes[sm];
+      u.life += dt;
+      if (u.life > u.ttl) { smokes.splice(sm, 1); continue; }
+      u.x += u.vx * dt;
+      u.y += u.vy * dt;
+    }
+  }
+
+  function renderHeat(i, t) {
+    var idle = isEmber[i] ? 0.1 + 0.13 * (0.5 + 0.5 * Math.sin(t * emberSpeed[i] + emberPhase[i])) : 0;
+    var g = glint[i] * 0.4;
+    var h = heat[i];
+    return h > idle ? (h > g ? h : g > idle ? g : idle) : (idle > g ? idle : g);
+  }
+
+  // ---------- render ----------
+  function draw(t) {
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.drawImage(bgLayer, 0, 0, W, H);
+
+    // average heat drives the core & floor glow
+    var avgHeat = 0, alive = 0;
+    for (var i = 0; i < N; i++) {
+      avgHeat += renderHeat(i, t) * (1 - burn[i]);
+      alive += 1 - burn[i];
+    }
+    avgHeat = alive > 4 ? avgHeat / alive : 0;
+    var presence = alive / N;
+
+    // floor reflection
+    var floorA = (0.04 + avgHeat * 0.22) * presence;
+    if (floorA > 0.01) {
+      ctx.save();
+      ctx.globalAlpha = floorA;
+      ctx.translate(CX, CY + R * 1.35);
+      ctx.scale(1, 0.22);
+      var fg = ctx.createRadialGradient(0, 0, 0, 0, 0, R * 1.05);
+      fg.addColorStop(0, "rgba(255,180,80,0.55)");
+      fg.addColorStop(1, "rgba(255,180,80,0)");
+      ctx.fillStyle = fg;
+      ctx.beginPath();
+      ctx.arc(0, 0, R * 1.05, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // smoke (behind the mesh)
+    ctx.globalCompositeOperation = "source-over";
+    for (var sm = 0; sm < smokes.length; sm++) {
+      var u = smokes[sm];
+      var lp = u.life / u.ttl;
+      var a = Math.sin(Math.PI * Math.min(1, lp)) * 0.22;
+      var rr = u.r0 + u.grow * lp * 2.2;
+      ctx.globalAlpha = a;
+      ctx.drawImage(smokePuff, u.x - rr, u.y - rr, rr * 2, rr * 2);
+    }
+    ctx.globalAlpha = 1;
+
+    // inner core glow
+    var coreA = presence * (0.1 + avgHeat * 0.6 + (reducedMotion ? 0 : Math.sin(t * 0.8) * 0.02));
+    if (coreA > 0.01) {
+      ctx.globalCompositeOperation = "lighter";
+      var cg = Math.min(0.9, 0.4 + coreA) * R * 1.8;
+      ctx.globalAlpha = Math.min(0.5, coreA);
+      ctx.drawImage(orangeGlow, CX - cg / 2, CY - cg / 2, cg, cg);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = "source-over";
+    }
+
+    // edges — cold ones batched by alpha bucket, hot ones individual
+    var buckets = [[], [], [], [], [], []];
+    var hotEdges = [];
+    for (var e = 0; e < edges.length; e++) {
+      var ea = edges[e][0], eb = edges[e][1];
+      var va = (1 - burn[ea]) * (1 - burn[eb]);
+      if (va < 0.02) continue;
+      var eh = (heat[ea] + heat[eb]) * 0.5;
+      if (eh > 0.06) { hotEdges.push([ea, eb, va, eh]); continue; }
+      var al = va * 0.55 * ((depth[ea] + depth[eb]) * 0.5);
+      var bi = Math.min(5, Math.floor(al * 10));
+      buckets[bi].push(e);
+    }
+    ctx.lineWidth = 0.8;
+    for (var bk = 1; bk < 6; bk++) {
+      var list = buckets[bk];
+      if (!list.length) continue;
+      ctx.strokeStyle = "rgba(38,35,30," + ((bk + 0.5) / 10).toFixed(2) + ")";
+      ctx.beginPath();
+      for (var li = 0; li < list.length; li++) {
+        var ed = edges[list[li]];
+        ctx.moveTo(px[ed[0]], py[ed[0]]);
+        ctx.lineTo(px[ed[1]], py[ed[1]]);
+      }
+      ctx.stroke();
+    }
+    for (var he = 0; he < hotEdges.length; he++) {
+      var hh = hotEdges[he];
+      var mix = Math.min(1, hh[3] * 1.5);
+      ctx.strokeStyle = "rgba(" + Math.round(38 + mix * 217) + "," + Math.round(35 + mix * 125) + "," + Math.round(30 + mix * 40) + "," + (hh[2] * (0.45 + mix * 0.4)).toFixed(2) + ")";
+      ctx.beginPath();
+      ctx.moveTo(px[hh[0]], py[hh[0]]);
+      ctx.lineTo(px[hh[1]], py[hh[1]]);
+      ctx.stroke();
+    }
+
+    // nodes
+    for (var n = 0; n < N; n++) {
+      var b = burn[n];
+      if (b >= 1) continue;
+      var rh = renderHeat(n, t);
+      var nodeA = Math.pow(1 - b, 1.2) * (0.35 + 0.65 * depth[n]);
+      var size = 1.1 + depth[n] * 0.9 + rh * 1.3;
+      if (rh > 0.1) {
+        ctx.globalCompositeOperation = "lighter";
+        var gs = (3 + rh * 11) * (0.7 + depth[n] * 0.3);
+        ctx.globalAlpha = Math.min(1, rh) * (1 - b) * 0.6;
+        ctx.drawImage(rh > 0.6 ? goldGlow : orangeGlow, px[n] - gs, py[n] - gs, gs * 2, gs * 2);
+        ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = "source-over";
+      }
+      var mix2 = Math.min(1, rh * 1.6);
+      ctx.fillStyle = "rgba(" + Math.round(38 + mix2 * 217) + "," + Math.round(35 + mix2 * 190) + "," + Math.round(30 + mix2 * 158) + "," + nodeA.toFixed(2) + ")";
+      ctx.beginPath();
+      ctx.arc(px[n], py[n], size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // sparks
+    if (sparks.length) {
+      ctx.globalCompositeOperation = "lighter";
+      for (var sp = 0; sp < sparks.length; sp++) {
+        var k = sparks[sp];
+        var lf = 1 - k.life / k.ttl;
+        var flick = 0.55 + 0.45 * Math.sin(k.life * 40 + k.rot * 9);
+        ctx.globalAlpha = Math.max(0, lf * flick);
+        if (k.tri) {
+          ctx.save();
+          ctx.translate(k.x, k.y);
+          ctx.rotate(k.rot);
+          ctx.fillStyle = lf > 0.5 ? "#ffd88f" : "#f09338";
+          ctx.beginPath();
+          ctx.moveTo(0, -k.size);
+          ctx.lineTo(k.size * 0.85, k.size * 0.6);
+          ctx.lineTo(-k.size * 0.85, k.size * 0.6);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        } else {
+          var gs2 = k.size * 2.4;
+          ctx.globalAlpha *= 0.6;
+          ctx.drawImage(goldGlow, k.x - gs2, k.y - gs2, gs2 * 2, gs2 * 2);
+          ctx.globalAlpha = Math.max(0, lf * flick);
+          ctx.fillStyle = "#ffe9bf";
+          ctx.beginPath();
+          ctx.arc(k.x, k.y, Math.max(0.5, k.size * 0.5), 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = "source-over";
+    }
+
+    // film grain
+    if (grainPattern) {
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = grainPattern;
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // ---------- main loop ----------
+  var last = performance.now();
+  var hidden = false;
+
+  function frame(now) {
+    requestAnimationFrame(frame);
+    if (hidden) return;
+    if (!W) { resize(); if (!W) return; }
+    var dt = Math.min(0.05, Math.max(0.001, (now - last) / 1000));
+    last = now;
+    var t = now / 1000;
+    simulate(dt, t);
+    draw(t);
+  }
+
+  document.addEventListener("visibilitychange", function () {
+    hidden = document.hidden;
+    last = performance.now();
+  });
+
+  window.addEventListener("resize", resize);
+  buildFigure();
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
