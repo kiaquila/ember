@@ -35,12 +35,14 @@ After the first green workflow run:
    copy of the workflow file, so a branch can delete the condition it disagrees
    with before asking for the write token. The repository guard can only check
    the workflows a pull request proposes; it cannot police a direct branch push.
-   Give `Web Design Update` a deployment environment whose branch rule allows
-   only the default branch, so GitHub — not the workflow file — decides whether
-   the job may run and whether its secrets are readable. Until that environment
-   exists, treat push access to this repository as equivalent to write access
-   through this workflow, and record that rather than claiming the condition
-   enforces it.
+   The job already declares `environment: web-design-update`, so GitHub creates
+   that environment on its first run. Creating it is not the control — open it
+   and restrict its deployment branches to the default branch, so GitHub, not
+   the workflow file, decides whether the job may run and whether its secrets
+   are readable. Scope `WEB_DESIGN_READ_TOKEN` to that environment rather than
+   to the repository. Until the branch rule is applied, treat push access to
+   this repository as equivalent to write access through this workflow, and
+   record that rather than claiming the condition enforces it.
 8. Enable available dependency alerts, automated fixes, secret scanning, and
    push protection.
 9. Keep deployment secrets in environment-scoped stores and restrict production

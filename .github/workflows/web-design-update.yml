@@ -32,6 +32,12 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+    # The condition above cannot enforce itself: a manual run picks a ref and
+    # GitHub loads that ref's copy of this file, so a branch could delete it.
+    # An environment is decided by GitHub rather than by this file, so restrict
+    # this environment's deployment branches to the default branch — see
+    # docs/operations/github-setup.md.
+    environment: web-design-update
     runs-on: ubuntu-latest
     steps:
       - name: Checkout trusted default branch

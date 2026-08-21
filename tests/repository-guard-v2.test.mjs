@@ -45,16 +45,115 @@ test("requires at least one real product check in consumer mode", () => {
   );
 });
 
-test("rejects product checks that only report success", () => {
-  for (const run of ["true", ":", "exit 0", "echo ok", "printf ok", "echo ok && true"]) {
+test("accepts product checks whose exit status comes from a real command", () => {
+  const accepted = [
+    "npm --prefix website run check",
+    "npm ci --prefix website && npm --prefix website run check",
+    "node --test tests/a.test.mjs tests/b.test.mjs",
+    'npm test -- --grep "a|b"',
+    "npm run build -- --tag '#1'",
+    "bash scripts/build.sh",
+    "npm run x -- --shell -c"
+  ];
+  for (const run of accepted) {
+    const valid = structuredClone(config);
+    valid.commands.check = [{ name: "site", run }];
+    assert.deepEqual(validateProjectConfig(valid, ["no-deploy"]), [], run);
+  }
+});
+
+test("rejects separators that let a failure be discarded", () => {
+  const discarded = [
+    "npm test; true",
+    "npm test || true",
+    "true || npm test",
+    "npm test | tee build.log",
+    "true | true",
+    "npm test &",
+    "npm test > /dev/null",
+    "npm test `true`",
+    "$(echo npm) test"
+  ];
+  for (const run of discarded) {
     const invalid = structuredClone(config);
-    invalid.commands.check = [{ name: "placeholder", run }];
+    invalid.commands.check = [{ name: "site", run }];
+    assert.deepEqual(
+      validateProjectConfig(invalid, ["no-deploy"]),
+      ["commands.check[0].run must join commands only with && and use no other shell operators"],
+      run
+    );
+  }
+});
+
+test("rejects commands that only report success", () => {
+  for (const run of ["true", ":", "exit 0", "echo ok", "printf ok", "npm test && true", "echo ok && npm test"]) {
+    const invalid = structuredClone(config);
+    invalid.commands.check = [{ name: "site", run }];
     assert.deepEqual(
       validateProjectConfig(invalid, ["no-deploy"]),
       ["commands.check[0].run must execute a real product check"],
       run
     );
   }
+});
+
+test("rejects a check that hands shell text to another shell", () => {
+  const nested = [
+    "sh -c 'npm test | true'",
+    "bash -c 'npm test'",
+    "/bin/sh -c 'npm test'",
+    "sh -ec 'npm test'",
+    "/bin/bash -euo pipefail -c 'npm test'",
+    "env sh -c 'npm test'",
+    "command sh -c 'npm test'",
+    "xargs sh -c 'npm test'",
+    "npm test && eval 'true'"
+  ];
+  for (const run of nested) {
+    const invalid = structuredClone(config);
+    invalid.commands.check = [{ name: "site", run }];
+    assert.deepEqual(
+      validateProjectConfig(invalid, ["no-deploy"]),
+      ["commands.check[0].run must not hand shell text to another shell"],
+      run
+    );
+  }
+});
+
+test("rejects comments, continuations, and unbalanced quotes", () => {
+  const malformed = [
+    ["npm test # disabled", "must not contain a shell comment"],
+    ["npm test\nnpm run lint", "must be a single line"],
+    ["npm test \\\n  && npm run lint", "must be a single line"],
+    ["npm test 'unclosed", "must not leave a quote unclosed"],
+    ["npm test && ", "must not contain an empty command"]
+  ];
+  for (const [run, expected] of malformed) {
+    const invalid = structuredClone(config);
+    invalid.commands.check = [{ name: "site", run }];
+    assert.deepEqual(
+      validateProjectConfig(invalid, ["no-deploy"]),
+      [`commands.check[0].run ${expected}`],
+      run
+    );
+  }
+});
+
+test("quoting cannot disguise a no-op or smuggle an expansion", () => {
+  for (const run of ['"true"', "'true'", '"echo" "ok"', '"sh" -c \'npm test\'']) {
+    const invalid = structuredClone(config);
+    invalid.commands.check = [{ name: "site", run }];
+    assert.equal(validateProjectConfig(invalid, ["no-deploy"]).length, 1, run);
+  }
+  const expansion = structuredClone(config);
+  expansion.commands.check = [{ name: "site", run: 'npm test -- --grep "$(evil)"' }];
+  assert.deepEqual(
+    validateProjectConfig(expansion, ["no-deploy"]),
+    ["commands.check[0].run must not expand anything outside single quotes"]
+  );
+  const singleQuoted = structuredClone(config);
+  singleQuoted.commands.check = [{ name: "site", run: "npm test -- --grep '$(literal)'" }];
+  assert.deepEqual(validateProjectConfig(singleQuoted, ["no-deploy"]), []);
 });
 
 test("rejects unsafe slugs, product paths, and unknown profiles", () => {
@@ -378,21 +477,6 @@ test("rejects write permissions on merge-queue and reusable-workflow triggers", 
   }
 });
 
-test("a shell comment ends at its newline and later commands still count", () => {
-  const valid = structuredClone(config);
-  valid.commands.check = [{ name: "site", run: "echo preparing # explanation\nnpm test" }];
-  assert.deepEqual(validateProjectConfig(valid, ["no-deploy"]), []);
-});
-
-test("rejects a multi-line check whose every line is a no-op", () => {
-  const invalid = structuredClone(config);
-  invalid.commands.check = [{ name: "placeholder", run: "echo a # x\ntrue\n# done" }];
-  assert.deepEqual(
-    validateProjectConfig(invalid, ["no-deploy"]),
-    ["commands.check[0].run must execute a real product check"]
-  );
-});
-
 test("allows a write job on a push narrowed to the default branch", () => {
   const failures = validateWorkflowText(
     ".github/workflows/example.yml",
@@ -423,26 +507,6 @@ test("a default-branch push loses its trust when a ref-selectable trigger joins 
       `on:\n  push:\n    branches:\n      - main\n${extra}\npermissions:\n  contents: read\njobs:\n  publish:\n    permissions:\n      contents: write\n    runs-on: ubuntu-latest\n`
     );
     assert.match(failures.join("\n"), /job publish may not grant write permissions/, extra);
-  }
-});
-
-test("rejects product checks that short-circuit past the real command", () => {
-  for (const run of ["true || npm test", "npm test || true", "npm test || echo skipped"]) {
-    const invalid = structuredClone(config);
-    invalid.commands.check = [{ name: "placeholder", run }];
-    assert.deepEqual(
-      validateProjectConfig(invalid, ["no-deploy"]),
-      ["commands.check[0].run must execute a real product check"],
-      run
-    );
-  }
-});
-
-test("keeps checks whose control flow still decides the outcome", () => {
-  for (const run of ["npm test && true", "true && npm test", "true; npm test", 'npm test -- --grep "a||b"']) {
-    const valid = structuredClone(config);
-    valid.commands.check = [{ name: "site", run }];
-    assert.deepEqual(validateProjectConfig(valid, ["no-deploy"]), [], run);
   }
 });
 
@@ -493,6 +557,79 @@ test("accepts only checkout refs that are provably the trusted branch", () => {
   }
 });
 
+test("a checkout path that lands back on the workspace is not isolation", () => {
+  for (const path of [".", "./", "../..", "/tmp/proposed", "${{ inputs.target }}"]) {
+    const failures = validateWorkflowText(
+      ".github/workflows/example.yml",
+      `on: issue_comment\npermissions:\n  contents: write\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@PIN\n        with:\n          ref: \${{ github.event.pull_request.head.sha }}\n          path: ${path}\n      - run: npm ci\n`.replace("PIN", "3d3c42e5aac5ba805825da76410c181273ba90b1")
+    );
+    assert.match(failures.join("\n"), /checks an untrusted ref out over the workspace/, path);
+  }
+});
+
+test("an isolated checkout stays data and is never executed", () => {
+  const executes = [
+    "node .proposed/scripts/build.mjs",
+    "npm ci --prefix .proposed",
+    ".proposed/build.sh",
+    "bash .proposed/x.sh"
+  ];
+  for (const run of executes) {
+    const failures = validateWorkflowText(
+      ".github/workflows/example.yml",
+      `on: issue_comment\npermissions:\n  contents: write\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n        with:\n          ref: \${{ github.event.pull_request.head.sha }}\n          path: .proposed\n      - run: ${run}\n`
+    );
+    assert.match(failures.join("\n"), /executes code from the untrusted checkout \.proposed/, run);
+  }
+
+  const workingDirectoryForms = [
+    "      - run: npm ci\n        working-directory: .proposed\n",
+    "      - run: npm ci\n        working-directory: ./.proposed\n",
+    "      - run: npm ci\n        working-directory: .proposed/website\n"
+  ];
+  for (const step of workingDirectoryForms) {
+    const failures = validateWorkflowText(
+      ".github/workflows/example.yml",
+      `on: issue_comment\npermissions:\n  contents: write\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n        with:\n          ref: \${{ github.event.pull_request.head.sha }}\n          path: .proposed\n${step}`
+    );
+    assert.match(failures.join("\n"), /executes code from the untrusted checkout \.proposed/, step);
+  }
+  const viaDefaults = validateWorkflowText(
+    ".github/workflows/example.yml",
+    "on: issue_comment\npermissions:\n  contents: write\njobs:\n  a:\n    runs-on: ubuntu-latest\n    defaults:\n      run:\n        working-directory: .proposed\n    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n        with:\n          ref: ${{ github.event.pull_request.head.sha }}\n          path: .proposed\n      - run: npm ci\n"
+  );
+  assert.match(viaDefaults.join("\n"), /executes code from the untrusted checkout \.proposed/);
+});
+
+test("a local action or dot-mangled directory cannot reach the isolated checkout", () => {
+  const forms = [
+    "      - uses: ./candidate/action\n",
+    "      - uses: ./candidate\n",
+    "      - run: npm ci\n        working-directory: ././candidate\n",
+    "      - run: npm ci\n        working-directory: candidate//sub\n"
+  ];
+  for (const step of forms) {
+    const failures = validateWorkflowText(
+      ".github/workflows/example.yml",
+      `on: issue_comment\npermissions:\n  contents: write\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n        with:\n          ref: \${{ github.event.pull_request.head.sha }}\n          path: candidate\n${step}`
+    );
+    assert.match(failures.join("\n"), /executes code from the untrusted checkout candidate/, step);
+  }
+  const safe = validateWorkflowText(
+    ".github/workflows/example.yml",
+    "on: issue_comment\npermissions:\n  contents: write\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n        with:\n          ref: ${{ github.event.pull_request.head.sha }}\n          path: candidate\n      - uses: ./scripts/action\n      - run: npm ci\n        working-directory: candidate-other\n"
+  );
+  assert.deepEqual(safe, []);
+});
+
+test("passing an isolated checkout to a trusted program is still allowed", () => {
+  const failures = validateWorkflowText(
+    ".github/workflows/example.yml",
+    "on: issue_comment\npermissions:\n  contents: write\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n        with:\n          ref: ${{ github.event.pull_request.head.sha }}\n          path: .proposed\n      - run: node scripts/check.mjs --root .proposed\n"
+  );
+  assert.deepEqual(failures, []);
+});
+
 test("keeps an untrusted checkout isolated under its own path", () => {
   const failures = validateWorkflowText(
     ".github/workflows/example.yml",
@@ -507,44 +644,6 @@ test("a read-only job may still check out proposed code", () => {
     "on: pull_request\npermissions:\n  contents: read\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n        with:\n          ref: ${{ github.event.pull_request.head.sha }}\n"
   );
   assert.deepEqual(failures, []);
-});
-
-test("rejects a pipeline whose last stage cannot fail", () => {
-  for (const run of ["true | true", "npm test | true"]) {
-    const invalid = structuredClone(config);
-    invalid.commands.check = [{ name: "placeholder", run }];
-    assert.deepEqual(
-      validateProjectConfig(invalid, ["no-deploy"]),
-      ["commands.check[0].run must execute a real product check"],
-      run
-    );
-  }
-});
-
-test("rejects a pipeline that swallows an earlier stage's failure", () => {
-  const piped = [
-    "npm test | tee build.log",
-    "npm run build | tee build.log",
-    "set -o pipefail; npm test | tee build.log",
-    "echo set -o pipefail; npm test | tee build.log"
-  ];
-  for (const run of piped) {
-    const invalid = structuredClone(config);
-    invalid.commands.check = [{ name: "site", run }];
-    assert.deepEqual(
-      validateProjectConfig(invalid, ["no-deploy"]),
-      ["commands.check[0].run must not pipe; a pipeline hides an earlier stage's failure"],
-      run
-    );
-  }
-});
-
-test("a quoted pipe is not a pipeline", () => {
-  for (const run of ['npm test -- --grep "a|b"', "npm test -- --grep 'x|y'"]) {
-    const valid = structuredClone(config);
-    valid.commands.check = [{ name: "site", run }];
-    assert.deepEqual(validateProjectConfig(valid, ["no-deploy"]), [], run);
-  }
 });
 
 test("allows top-level write permissions on default-branch-only events", () => {
@@ -563,26 +662,6 @@ test("a manual write job stays valid when it keeps the default-branch gate", () 
     "on: workflow_dispatch\npermissions:\n  contents: read\njobs:\n  publish:\n    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}\n    permissions:\n      contents: write\n    runs-on: ubuntu-latest\n"
   );
   assert.deepEqual(failures, []);
-});
-
-test("rejects product checks that a shell comment reduces to a no-op", () => {
-  for (const run of ["true # TODO", "echo ok # still nothing", ":;# skip", "# nothing"]) {
-    const invalid = structuredClone(config);
-    invalid.commands.check = [{ name: "placeholder", run }];
-    assert.deepEqual(
-      validateProjectConfig(invalid, ["no-deploy"]),
-      ["commands.check[0].run must execute a real product check"],
-      run
-    );
-  }
-});
-
-test("keeps a hash the shell would not treat as a comment", () => {
-  for (const run of ["npm run build -- --tag '#1'", 'npm test -- --grep "#slow"', "npm test # still runs", "true#x"]) {
-    const valid = structuredClone(config);
-    valid.commands.check = [{ name: "site", run }];
-    assert.deepEqual(validateProjectConfig(valid, ["no-deploy"]), [], run);
-  }
 });
 
 test("workflow jobs that execute Node install the pinned runtime first", () => {

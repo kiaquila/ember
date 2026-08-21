@@ -82,69 +82,30 @@ const PERSONAL_PATH_PATTERNS = [
   /[A-Za-z]:\\Users\\[A-Za-z0-9._-]+\\/
 ];
 
-const KNOWN_NO_OP_COMMAND = /^(?:(?:true|:|exit\s+0|echo(?:\s+.*)?|printf(?:\s+.*)?)(?:\s*(?:&&|;)\s*)?)+$/;
+// Validating free-form shell here is a losing game: every round of review found
+// another construct that runs the check but discards its verdict — a trailing
+// `; true`, a `|| true`, a `| tee`, a comment, a nested `sh -c`, a line
+// continuation. Rather than keep enumerating them, a product check is
+// constrained to a shape whose exit status provably comes from a real command.
+//
+// A check is one line of simple commands joined only by `&&`. That operator is
+// the one separator that propagates failure: `A && B` fails when A fails and
+// reports B otherwise. `;`, `||`, `|`, and `&` each let an earlier failure be
+// discarded, and command substitution, redirection, and expansion can reach
+// around the rule entirely. Anything that needs them belongs in a script file
+// the project runs, where the code is reviewed rather than quoted.
+const KNOWN_NO_OP_COMMAND = /^(?:true|:|exit\s+0|echo(?:\s+.*)?|printf(?:\s+.*)?)$/;
+const SHELL_CONTROL_CHARACTERS = /[;|&`<>(){}$\\]/;
 
-// A shell only starts a comment at an unquoted `#` that begins a word, and the
-// comment ends at the newline rather than at the end of the script, so later
-// lines must survive.
-function stripShellComments(command) {
-  let stripped = "";
-  let quote = null;
-  let index = 0;
-  while (index < command.length) {
-    const character = command[index];
-    if (quote) {
-      if (character === "\\" && quote === '"') {
-        stripped += character + (command[index + 1] ?? "");
-        index += 2;
-        continue;
-      }
-      if (character === quote) quote = null;
-      stripped += character;
-      index += 1;
-      continue;
-    }
-    if (character === "'" || character === '"') {
-      quote = character;
-      stripped += character;
-      index += 1;
-      continue;
-    }
-    if (character === "\\") {
-      stripped += character + (command[index + 1] ?? "");
-      index += 2;
-      continue;
-    }
-    if (character === "#" && (index === 0 || /[\s;&|(]/.test(command[index - 1]))) {
-      const newline = command.indexOf("\n", index);
-      if (newline === -1) break;
-      stripped += "\n";
-      index = newline + 1;
-      continue;
-    }
-    stripped += character;
-    index += 1;
-  }
-  return stripped;
-}
-
-// `A || B` succeeds as soon as one branch succeeds, so a single always-true
-// branch anywhere in the chain makes the whole line pass without the product
-// check ever deciding the outcome.
-function shortCircuitBranches(line) {
-  const branches = [];
+function splitOutsideQuotes(command) {
+  const segments = [];
   let current = "";
   let quote = null;
-  for (let index = 0; index < line.length; index += 1) {
-    const character = line[index];
+  for (let index = 0; index < command.length; index += 1) {
+    const character = command[index];
     if (quote) {
-      if (character === "\\" && quote === '"') {
-        current += character + (line[index + 1] ?? "");
-        index += 1;
-        continue;
-      }
-      if (character === quote) quote = null;
       current += character;
+      if (character === quote) quote = null;
       continue;
     }
     if (character === "'" || character === '"') {
@@ -152,79 +113,120 @@ function shortCircuitBranches(line) {
       current += character;
       continue;
     }
-    if (character === "|" && line[index + 1] === "|") {
-      branches.push(current);
+    if (character === "&" && command[index + 1] === "&") {
+      segments.push(current);
       current = "";
       index += 1;
       continue;
     }
     current += character;
   }
-  branches.push(current);
-  return branches.map((branch) => branch.trim()).filter(Boolean);
+  if (quote) return null;
+  segments.push(current);
+  return segments;
 }
 
-// A pipeline reports its last stage's status, so `npm test | true` and
-// `true | true` both succeed no matter what the earlier stages did.
-function finalPipelineStage(branch) {
-  let stage = "";
+function outsideQuotes(command) {
+  let bare = "";
   let quote = null;
-  for (let index = 0; index < branch.length; index += 1) {
-    const character = branch[index];
+  for (const character of command) {
     if (quote) {
-      if (character === "\\" && quote === '"') {
-        stage += character + (branch[index + 1] ?? "");
-        index += 1;
-        continue;
-      }
       if (character === quote) quote = null;
-      stage += character;
       continue;
     }
     if (character === "'" || character === '"') {
       quote = character;
-      stage += character;
       continue;
     }
-    if (character === "|") {
-      stage = "";
-      continue;
-    }
-    stage += character;
+    bare += character;
   }
-  return stage.trim();
+  return bare;
 }
 
-function hasTopLevelPipeline(branch) {
-  let quote = null;
-  for (let index = 0; index < branch.length; index += 1) {
-    const character = branch[index];
-    if (quote) {
-      if (character === "\\" && quote === '"') index += 1;
-      else if (character === quote) quote = null;
-      continue;
+// The structural rule above bans the shell operators, which leaves one way to
+// reach a second round of parsing: hand the text to another shell. Tokens are
+// compared rather than pattern-matched so a wrapper (`env sh -c`), a path
+// (`/bin/sh -c`), and combined flags (`sh -ec`) are all caught.
+const SHELL_NAMES = new Set(["sh", "bash", "zsh", "dash", "ksh", "csh", "tcsh", "fish"]);
+
+function executesNestedShell(bareSegment) {
+  const tokens = bareSegment.split(/\s+/).filter(Boolean);
+  for (const [index, token] of tokens.entries()) {
+    if (token === "eval") return true;
+    const name = token.slice(token.lastIndexOf("/") + 1);
+    if (!SHELL_NAMES.has(name)) continue;
+    for (const flag of tokens.slice(index + 1)) {
+      if (/^-[A-Za-z]*c[A-Za-z]*$/.test(flag)) return true;
     }
-    if (character === "'" || character === '"') quote = character;
-    else if (character === "|") return true;
   }
   return false;
 }
 
-// `run-project-checks.mjs` runs the command through a shell without `pipefail`,
-// so a pipeline reports only its last stage: `npm test | tee build.log` is green
-// whatever the tests did. There is deliberately no opt-out. Searching the text
-// for `set -o pipefail` would accept `echo set -o pipefail; npm test | tee log`,
-// where the shell only prints it — the same trap as validating a script by
-// grepping it. A check that needs a pipeline belongs in a script file the
-// project already runs, where the shell options are real.
-function discardsPipelineFailure(line) {
-  return shortCircuitBranches(line).some((branch) => hasTopLevelPipeline(branch));
+// Single quotes suppress every expansion; double quotes do not, so a command
+// substitution can hide inside them and decide the command word at runtime.
+function hasExpansionOutsideSingleQuotes(segment) {
+  let quote = null;
+  for (let index = 0; index < segment.length; index += 1) {
+    const character = segment[index];
+    if (quote === "'") {
+      if (character === "'") quote = null;
+      continue;
+    }
+    if (character === "'" && quote === null) {
+      quote = "'";
+      continue;
+    }
+    if (character === '"') {
+      quote = quote === '"' ? null : '"';
+      continue;
+    }
+    if (character === "$" || character === "`" || character === "\\") return true;
+  }
+  return false;
 }
 
-function isNoOpCommandLine(line) {
-  const branches = shortCircuitBranches(line);
-  if (!branches.length) return true;
-  return branches.some((branch) => KNOWN_NO_OP_COMMAND.test(finalPipelineStage(branch)));
+// With expansions refused, quotes are pure grouping, so removing the quote
+// characters (keeping their content) yields the words the shell would run.
+function withoutQuoteCharacters(segment) {
+  let bare = "";
+  let quote = null;
+  for (const character of segment) {
+    if (quote) {
+      if (character === quote) quote = null;
+      else bare += character;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+    bare += character;
+  }
+  return bare;
+}
+
+export function validateProductCheckCommand(command) {
+  if (/[\n\r]/.test(command)) return "must be a single line";
+  const segments = splitOutsideQuotes(command);
+  if (segments === null) return "must not leave a quote unclosed";
+  for (const segment of segments) {
+    const trimmed = segment.trim().replace(/\s+/g, " ");
+    if (!trimmed) return "must not contain an empty command";
+    const bare = outsideQuotes(trimmed);
+    if (SHELL_CONTROL_CHARACTERS.test(bare)) {
+      return "must join commands only with && and use no other shell operators";
+    }
+    if (hasExpansionOutsideSingleQuotes(trimmed)) {
+      return "must not expand anything outside single quotes";
+    }
+    if (bare.includes("#")) return "must not contain a shell comment";
+    const unquoted = withoutQuoteCharacters(trimmed).trim().replace(/\s+/g, " ");
+    if (executesNestedShell(unquoted)) {
+      return "must not hand shell text to another shell";
+    }
+    if (KNOWN_NO_OP_COMMAND.test(unquoted)) return "must execute a real product check";
+  }
+  return null;
 }
 
 function parseRoot(argv = process.argv.slice(2)) {
@@ -291,17 +293,8 @@ export function validateProjectConfig(config, profiles = []) {
         failures.push(`commands.check[${index}].run must be a non-empty string`);
         continue;
       }
-      const lines = stripShellComments(check.run)
-        .split("\n")
-        .map((line) => line.trim().replace(/\s+/g, " "))
-        .filter(Boolean);
-      if (!lines.length || lines.every((line) => isNoOpCommandLine(line))) {
-        failures.push(`commands.check[${index}].run must execute a real product check`);
-      } else if (lines.some((line) => discardsPipelineFailure(line))) {
-        failures.push(
-          `commands.check[${index}].run must not pipe; a pipeline hides an earlier stage's failure`
-        );
-      }
+      const problem = validateProductCheckCommand(check.run);
+      if (problem) failures.push(`commands.check[${index}].run ${problem}`);
     }
   }
   const rootDirectory = config?.deployment?.rootDirectory;
@@ -496,19 +489,84 @@ const TRUSTED_CHECKOUT_REFS = [
   /^refs\/heads\/main$/
 ];
 
-function stepChecksOutUntrustedRefIntoWorkspace(step) {
+// `path: .`, `path: ./`, and `path: ../..` all land back on the workspace, so an
+// isolated checkout has to be a literal relative subdirectory.
+function isolatedCheckoutDirectory(node) {
+  if (!isScalar(node) || typeof node.value !== "string") return null;
+  const requested = node.value.trim();
+  if (!requested || requested.includes("${{")) return null;
+  if (requested.startsWith("/") || /^[A-Za-z]:/.test(requested)) return null;
+  const segments = requested.split(/[\\/]+/).filter(Boolean);
+  if (!segments.length) return null;
+  if (segments.some((segment) => segment === "." || segment === "..")) return null;
+  return segments.join("/");
+}
+
+function untrustedCheckoutDirectory(step) {
   const uses = mapPair(step, "uses");
-  if (!isScalar(uses?.value) || typeof uses.value.value !== "string") return false;
-  if (!/^actions\/checkout@/.test(uses.value.value)) return false;
+  if (!isScalar(uses?.value) || typeof uses.value.value !== "string") return undefined;
+  if (!/^actions\/checkout@/.test(uses.value.value)) return undefined;
   const withNode = mapPair(step, "with")?.value;
-  if (!isMap(withNode)) return false;
+  if (!isMap(withNode)) return undefined;
   const ref = mapPair(withNode, "ref")?.value;
-  if (!ref) return false;
-  if (!isScalar(ref) || typeof ref.value !== "string") return true;
-  const requested = ref.value.trim();
-  if (TRUSTED_CHECKOUT_REFS.some((pattern) => pattern.test(requested))) return false;
-  const path = mapPair(withNode, "path")?.value;
-  return !(isScalar(path) && typeof path.value === "string" && path.value.trim());
+  if (!ref) return undefined;
+  if (isScalar(ref) && typeof ref.value === "string") {
+    const requested = ref.value.trim();
+    if (TRUSTED_CHECKOUT_REFS.some((pattern) => pattern.test(requested))) return undefined;
+  }
+  return isolatedCheckoutDirectory(mapPair(withNode, "path")?.value);
+}
+
+// Isolating the tree keeps it inspectable as data; it stops being data the
+// moment a step runs something out of it. Passing the directory as an argument
+// to a trusted program is still fine, which is what the baseline's own
+// verification workflow does.
+function normalizedRelativeSegments(value) {
+  if (typeof value !== "string") return null;
+  const requested = value.trim();
+  if (!requested || requested.includes("${{")) return null;
+  if (requested.startsWith("/") || /^[A-Za-z]:/.test(requested)) return null;
+  const segments = requested.split(/[\\/]+/).filter((segment) => segment && segment !== ".");
+  if (segments.some((segment) => segment === "..")) return null;
+  return segments;
+}
+
+function pathEntersUntrustedTree(value, directory) {
+  const segments = normalizedRelativeSegments(value);
+  if (segments === null) return false;
+  const target = directory.split("/");
+  if (segments.length < target.length) return false;
+  return target.every((segment, index) => segments[index] === segment);
+}
+
+function directoryEntersUntrustedTree(node, directory) {
+  if (!isScalar(node) || typeof node.value !== "string") return false;
+  return pathEntersUntrustedTree(node.value, directory);
+}
+
+function stepExecutesFromDirectory(step, directory, jobDefaultsEnterTree) {
+  const uses = mapPair(step, "uses")?.value;
+  if (isScalar(uses) && typeof uses.value === "string") {
+    const reference = uses.value.trim();
+    if (reference.startsWith("./") && pathEntersUntrustedTree(reference.slice(2), directory)) {
+      return true;
+    }
+  }
+  const workingDirectory = mapPair(step, "working-directory")?.value;
+  const hasRun = isScalar(mapPair(step, "run")?.value);
+  if (hasRun && workingDirectory && directoryEntersUntrustedTree(workingDirectory, directory)) {
+    return true;
+  }
+  if (hasRun && !workingDirectory && jobDefaultsEnterTree) return true;
+  const run = mapPair(step, "run")?.value;
+  if (!isScalar(run) || typeof run.value !== "string") return false;
+  const quoted = directory.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const interpreters = "node|bash|sh|zsh|dash|python3?|npx|deno|ruby|perl|go|make";
+  return (
+    new RegExp(`(?:^|[\\s;&|(])(?:[^\\s;&|(]*/)?${quoted}/`, "m").test(run.value) ||
+    new RegExp(`(?:^|[\\s;&|(])(?:${interpreters})\\s+\\S*${quoted}/`, "m").test(run.value) ||
+    new RegExp(`--prefix\\s+\\S*${quoted}(?:\\s|$|["'])`, "m").test(run.value)
+  );
 }
 
 function dispatchOnlyJob(job) {
@@ -668,11 +726,32 @@ export function validateWorkflowText(path, text) {
           ? permissionWrites(jobPermissions.value, `job ${jobName} permissions`, failures, path)
           : topLevelWrites;
         if (writes && isSeq(steps)) {
+          const isolated = [];
           for (const step of steps.items) {
-            if (isMap(step) && stepChecksOutUntrustedRefIntoWorkspace(step)) {
+            if (!isMap(step)) continue;
+            const directory = untrustedCheckoutDirectory(step);
+            if (directory === undefined) continue;
+            if (directory === null) {
               failures.push(
                 `Write-capable job ${jobName} checks an untrusted ref out over the workspace: ${path}`
               );
+              continue;
+            }
+            isolated.push(directory);
+          }
+          const jobDefaults = mapPair(jobPair.value, "defaults")?.value;
+          const jobRunDefaults = isMap(jobDefaults) ? mapPair(jobDefaults, "run")?.value : undefined;
+          const jobWorkingDirectory = isMap(jobRunDefaults)
+            ? mapPair(jobRunDefaults, "working-directory")?.value
+            : undefined;
+          for (const directory of isolated) {
+            const defaultsEnterTree = directoryEntersUntrustedTree(jobWorkingDirectory, directory);
+            for (const step of steps.items) {
+              if (isMap(step) && stepExecutesFromDirectory(step, directory, defaultsEnterTree)) {
+                failures.push(
+                  `Write-capable job ${jobName} executes code from the untrusted checkout ${directory}: ${path}`
+                );
+              }
             }
           }
         }
