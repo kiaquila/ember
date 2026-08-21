@@ -84,6 +84,32 @@ const PERSONAL_PATH_PATTERNS = [
 
 const KNOWN_NO_OP_COMMAND = /^(?:(?:true|:|exit\s+0|echo(?:\s+.*)?|printf(?:\s+.*)?)(?:\s*(?:&&|;)\s*)?)+$/;
 
+// A shell only starts a comment at an unquoted `#` that begins a word, so the
+// no-op test must run against the code the shell would actually execute.
+function stripShellComments(command) {
+  let quote = null;
+  for (let index = 0; index < command.length; index += 1) {
+    const character = command[index];
+    if (quote) {
+      if (character === "\\" && quote === '"') index += 1;
+      else if (character === quote) quote = null;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+    if (character === "\\") {
+      index += 1;
+      continue;
+    }
+    if (character !== "#") continue;
+    const previous = index === 0 ? "" : command[index - 1];
+    if (index === 0 || /[\s;&|(]/.test(previous)) return command.slice(0, index);
+  }
+  return command;
+}
+
 function parseRoot(argv = process.argv.slice(2)) {
   const index = argv.indexOf("--root");
   if (index === -1) return resolve(import.meta.dirname, "..");
@@ -148,8 +174,8 @@ export function validateProjectConfig(config, profiles = []) {
         failures.push(`commands.check[${index}].run must be a non-empty string`);
         continue;
       }
-      const normalized = check.run.trim().replace(/\s+/g, " ");
-      if (KNOWN_NO_OP_COMMAND.test(normalized)) {
+      const normalized = stripShellComments(check.run).trim().replace(/\s+/g, " ");
+      if (!normalized || KNOWN_NO_OP_COMMAND.test(normalized)) {
         failures.push(`commands.check[${index}].run must execute a real product check`);
       }
     }
@@ -288,6 +314,19 @@ function permissionWrites(node, scope, failures, path) {
   return writes;
 }
 
+// GitHub takes the workflow file from a ref the actor chooses for these events,
+// so a write-capable job reachable from one of them can run unreviewed code with
+// a write token. Every other event runs the default branch's copy of the file.
+const REF_SELECTABLE_EVENTS = new Set([
+  "create",
+  "delete",
+  "pull_request",
+  "pull_request_target",
+  "push",
+  "release",
+  "workflow_dispatch"
+]);
+
 function dispatchOnlyJob(job) {
   const conditionNode = mapPair(job, "if")?.value;
   if (!isScalar(conditionNode) || typeof conditionNode.value !== "string") return false;
@@ -380,7 +419,7 @@ export function validateWorkflowText(path, text) {
     if (events.has("pull_request_target")) {
       failures.push(`High-risk pull_request_target trigger in ${path}`);
     }
-    const pullRequest = events.has("pull_request");
+    const refSelectable = [...events].some((event) => REF_SELECTABLE_EVENTS.has(event));
     const topPermissions = mapPair(root, "permissions");
     if (!topPermissions) {
       failures.push(`Workflow must declare top-level permissions: ${path}`);
@@ -389,8 +428,10 @@ export function validateWorkflowText(path, text) {
       if (isScalar(topPermissions.value) && topPermissions.value.value === "write-all") {
         failures.push(`Workflow may not use write-all permissions: ${path}`);
       }
-      if (pullRequest && writes) {
-        failures.push(`Pull-request workflow may not grant top-level write permissions: ${path}`);
+      if (refSelectable && writes) {
+        failures.push(
+          `Ref-selectable workflow may not grant top-level write permissions: ${path}`
+        );
       }
     }
     const jobs = mapPair(root, "jobs")?.value;
@@ -432,8 +473,10 @@ export function validateWorkflowText(path, text) {
         const jobPermissions = mapPair(jobPair.value, "permissions");
         if (!jobPermissions) continue;
         const writes = permissionWrites(jobPermissions.value, `job ${jobName} permissions`, failures, path);
-        if (pullRequest && writes && !dispatchOnlyJob(jobPair.value)) {
-          failures.push(`Pull-request job ${jobName} may not grant write permissions: ${path}`);
+        if (refSelectable && writes && !dispatchOnlyJob(jobPair.value)) {
+          failures.push(
+            `Ref-selectable job ${jobName} may not grant write permissions: ${path}`
+          );
         }
       }
     }

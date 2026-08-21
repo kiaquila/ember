@@ -182,7 +182,7 @@ test("recognizes pull requests in every supported workflow trigger shape", () =>
 test("does not confuse a nested branch name with a pull-request trigger", () => {
   const failures = validateWorkflowText(
     ".github/workflows/example.yml",
-    "on:\n  push:\n    branches: [pull_request]\npermissions:\n  contents: write\njobs:\n  test:\n    runs-on: ubuntu-latest\n"
+    "on:\n  push:\n    branches: [pull_request, pull_request_target]\npermissions:\n  contents: read\njobs:\n  test:\n    runs-on: ubuntu-latest\n"
   );
   assert.deepEqual(failures, []);
 });
@@ -342,6 +342,68 @@ test("rejects write-capable jobs whose condition also admits pull requests", () 
     "on: [pull_request, workflow_dispatch]\npermissions:\n  contents: read\njobs:\n  publish:\n    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' }}\n    permissions:\n      contents: write\n    runs-on: ubuntu-latest\n"
   );
   assert.match(failures.join("\n"), /job publish may not grant write permissions/);
+});
+
+test("rejects top-level write permissions on an unconstrained push workflow", () => {
+  const failures = validateWorkflowText(
+    ".github/workflows/example.yml",
+    "on: push\npermissions:\n  contents: write\njobs:\n  publish:\n    runs-on: ubuntu-latest\n"
+  );
+  assert.match(failures.join("\n"), /may not grant top-level write permissions/);
+});
+
+test("rejects a write-capable push job with no default-branch dispatch gate", () => {
+  const failures = validateWorkflowText(
+    ".github/workflows/example.yml",
+    "on: push\npermissions:\n  contents: read\njobs:\n  publish:\n    permissions:\n      contents: write\n    runs-on: ubuntu-latest\n"
+  );
+  assert.match(failures.join("\n"), /job publish may not grant write permissions/);
+});
+
+test("rejects top-level write permissions on a manual-only workflow", () => {
+  const failures = validateWorkflowText(
+    ".github/workflows/example.yml",
+    "on: workflow_dispatch\npermissions:\n  contents: write\njobs:\n  publish:\n    runs-on: ubuntu-latest\n"
+  );
+  assert.match(failures.join("\n"), /may not grant top-level write permissions/);
+});
+
+test("allows top-level write permissions on default-branch-only events", () => {
+  for (const trigger of ["issue_comment", "workflow_run", "schedule"]) {
+    const failures = validateWorkflowText(
+      ".github/workflows/example.yml",
+      `on: ${trigger}\npermissions:\n  contents: write\njobs:\n  publish:\n    runs-on: ubuntu-latest\n`
+    );
+    assert.deepEqual(failures, [], trigger);
+  }
+});
+
+test("a manual write job stays valid when it keeps the default-branch gate", () => {
+  const failures = validateWorkflowText(
+    ".github/workflows/example.yml",
+    "on: workflow_dispatch\npermissions:\n  contents: read\njobs:\n  publish:\n    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}\n    permissions:\n      contents: write\n    runs-on: ubuntu-latest\n"
+  );
+  assert.deepEqual(failures, []);
+});
+
+test("rejects product checks that a shell comment reduces to a no-op", () => {
+  for (const run of ["true # TODO", "echo ok # still nothing", ":;# skip", "# nothing"]) {
+    const invalid = structuredClone(config);
+    invalid.commands.check = [{ name: "placeholder", run }];
+    assert.deepEqual(
+      validateProjectConfig(invalid, ["no-deploy"]),
+      ["commands.check[0].run must execute a real product check"],
+      run
+    );
+  }
+});
+
+test("keeps a hash the shell would not treat as a comment", () => {
+  for (const run of ["npm run build -- --tag '#1'", 'npm test -- --grep "#slow"', "npm test # still runs", "true#x"]) {
+    const valid = structuredClone(config);
+    valid.commands.check = [{ name: "site", run }];
+    assert.deepEqual(validateProjectConfig(valid, ["no-deploy"]), [], run);
+  }
 });
 
 test("workflow jobs that execute Node install the pinned runtime first", () => {
