@@ -1,5 +1,5 @@
 {
-  "name": "web-design-project-template",
+  "name": "ember",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,5 +13,6 @@
   },
   "engines": {
     "node": ">=22.18.0"
-  }
+  },
+  "description": "Ember — an interactive burn study for the ks·design lab"
 }

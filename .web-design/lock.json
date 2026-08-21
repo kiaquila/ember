@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "version": "0.1.0-dev",
-  "sourceCommit": null,
-  "profile": "no-deploy",
+  "sourceCommit": "f042879d8b6d11cc80021bb19cc4aacd645cc621",
+  "profile": "static-cloudflare",
   "manifestSha256": "6ecb568d8dccc18a19a1880a4015fd4afed3165f1ce838966ed1f670d0d4eb20",
   "files": {
     ".github/CODEOWNERS": "f8446f5baffd70a7df055eaa9c26f855ea8a9e2f3063e0035615c03580b83074",

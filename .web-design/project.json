@@ -1,22 +1,29 @@
 {
   "schemaVersion": 1,
   "project": {
-    "slug": "web-project",
-    "profile": "no-deploy",
-    "productPaths": []
+    "slug": "ember",
+    "profile": "static-cloudflare",
+    "productPaths": [
+      "website"
+    ]
   },
   "commands": {
-    "check": []
+    "check": [
+      {
+        "name": "project-check",
+        "run": "npm --prefix website run check"
+      }
+    ]
   },
   "deployment": {
-    "provider": "none",
+    "provider": "cloudflare-workers",
     "productionBranch": "main",
-    "rootDirectory": "."
+    "rootDirectory": "website"
   },
   "governance": {
     "source": "kiaquila/web-design",
     "channel": "v1",
-    "mode": "source"
+    "mode": "consumer"
   },
   "requiredChecks": [
     "project-ci",

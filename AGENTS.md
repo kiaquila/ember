@@ -1,7 +1,21 @@
 # AGENTS.md — Ember
 
-Project-specific notes; repository-wide rules in the root `AGENTS.md` remain
-in force.
+Project-specific notes for the Ember study. Read [`README.md`](./README.md)
+first for the traced motion references and the client decisions.
+
+## Shared standards
+
+This repository consumes the `kiaquila/web-design` baseline. Follow every
+document under [`docs/standards/`](./docs/standards/); the runbooks under
+[`docs/operations/`](./docs/operations/) describe bootstrap, updates, GitHub
+settings and handoff. Those files are upstream-managed and change only through
+a reviewed update pull request — do not edit them here. The project's profile
+and its executable checks are recorded in `.web-design/project.json`.
+
+The rules below are this project's own and may tighten, never weaken, the
+shared standards.
+
+## Project rules
 
 - This is a self-contained lab piece, not a client business site. The page
   lives in [`website/src/index.html`](./website/src/index.html) — keep it a
@@ -22,10 +36,14 @@ in force.
   `make-og.mjs` to match the page, bump that constant, rerun `npm run og`,
   and commit the regenerated card — never bump the constant alone.
 - The stage is a Cloudflare Worker named `ember`, configured as documented in
-  [`docs/stage-hosting.md`](../docs/stage-hosting.md). Its Content-Security-
+  [`docs/stage-hosting.md`](./docs/stage-hosting.md). Its Content-Security-
   Policy allows inline script and style because the page is one file by
   design; that allowance is safe only while the build check keeps the page
-  free of off-origin references, so do not weaken that check.
+  free of off-origin references, so do not weaken that check. The Worker still
+  builds from `kiaquila/web-design` at root `ember/website`: its Git connection
+  was not moved when this repository was created, so until the documented
+  cutover runs, `main` here deploys nothing and the old path stays in place as
+  the rollback route.
 - The motion concept is traced in [`README.md`](./README.md). Do not copy
   assets or code from the referenced Pinterest pin or reactive-dots site;
   only the documented motion idea is reproduced.
@@ -44,4 +62,5 @@ in force.
 - Audio must remain gesture-gated (autoplay policy) and fully silenced by
   mute; keep `prefers-reduced-motion` support working.
 - Before pushing: exercise hover, the full play cycle, stop, mute, and a
-  narrow viewport; run `node scripts/check-repository.mjs`.
+  narrow viewport; run `npm run preflight` and `npm --prefix website run check`.
+  Sound needs a real gesture — a scripted `click()` grants no user activation.

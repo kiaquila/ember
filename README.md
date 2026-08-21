@@ -75,17 +75,49 @@ The study is published as its own Cloudflare Worker, `ember`, at
 [ember.ks-design.workers.dev](https://ember.ks-design.workers.dev) and at the
 custom domain [ember.ks-design.art](https://ember.ks-design.art) the portfolio
 links. Its dashboard settings live in
-[`docs/stage-hosting.md`](../docs/stage-hosting.md); the deploy itself is run
+[`docs/stage-hosting.md`](./docs/stage-hosting.md); the deploy itself is run
 by Cloudflare, not by this repository.
+
+**The stage still builds from the old repository.** The Worker's Git connection
+was not moved when this repository was created: it is still `kiaquila/web-design`
+with root `ember/website`. Both URLs above keep working from that build. The
+cutover, its verification and its rollback are written down in
+[`docs/stage-hosting.md`](./docs/stage-hosting.md) and need the account owner,
+so until they run, `main` here deploys nothing and the `ember/` path in the old
+repository must stay in place as the rollback route.
+
+## Repository baseline
+
+This repository is a standalone consumer of the shared `kiaquila/web-design`
+baseline: the policy scripts, guardrail workflows, regression tests and the
+standards under [`docs/standards/`](./docs/standards/) are managed upstream and
+change only through a reviewed update pull request. The project's own code,
+content, documents and deployment configuration are never touched by that
+updater. The selected profile, the executable checks and the pinned baseline
+are recorded in `.web-design/project.json` and `.web-design/lock.json`.
+
+The pin is **provisional**. `lock.json` points at commit
+`f042879d8b6d11cc80021bb19cc4aacd645cc621`, the head of the still-draft
+[kiaquila/web-design#46](https://github.com/kiaquila/web-design/pull/46), whose
+version is the prerelease `0.1.0-dev`. There is no immutable stable release to
+pin yet. Once #46 is merged and the first stable release is tagged, this
+repository has to be synced onto that release's full SHA in its own pull
+request.
+
+How this repository was extracted from the monorepository, and the proofs taken
+at the time, are recorded in
+[`docs/migration/source-provenance.md`](./docs/migration/source-provenance.md).
 
 ## Checks
 
-- `npm --prefix ember/website run check` — the build plus its tests.
-- `npm --prefix ember/website run dev` — build and serve `dist/` on port 4660.
+- `npm run preflight` — the shared baseline's own check: repository policy,
+  managed-file drift and the baseline regression tests.
+- `npm --prefix website run check` — the build plus its tests. This is the
+  check CI runs for the project.
+- `npm --prefix website run dev` — build and serve `dist/` on port 4660.
 - Verify by hand: hover ignition and recovery, the full Play cycle (burn →
   gone → reassemble → loop), Stop, mute, the footer link, the favicon in light
   and dark browser themes, and a narrow-viewport layout. Sound needs a real
   gesture — a scripted `click()` grants no user activation, and a browser
   profile that has already earned media engagement resumes the context
   immediately, which hides exactly the bug a fresh profile reveals.
-- `node scripts/check-repository.mjs` from the repository root.
