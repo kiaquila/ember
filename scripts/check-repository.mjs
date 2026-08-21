@@ -1,9 +1,22 @@
 #!/usr/bin/env node
 
 import { existsSync, lstatSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { basename, isAbsolute, join, normalize, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+
+const requirePolicyDependency = createRequire(
+  new URL("../.web-design/policy/package.json", import.meta.url)
+);
+const policyNodeModules = resolve(
+  fileURLToPath(new URL("../.web-design/policy/node_modules", import.meta.url))
+);
+const yamlEntry = resolve(requirePolicyDependency.resolve("yaml"));
+if (!yamlEntry.startsWith(`${policyNodeModules}${sep}`)) {
+  throw new Error("Managed policy dependency yaml is not installed under .web-design/policy");
+}
+const { isAlias, isMap, isScalar, isSeq, parseDocument } = requirePolicyDependency(yamlEntry);
 
 const REQUIRED_ROOT_FILES = [
   ".gitignore",
@@ -30,7 +43,8 @@ const REQUIRED_ROOT_FILES = [
   "docs/operations/bootstrap.md",
   "docs/operations/github-setup.md",
   "docs/operations/updates.md",
-  "package.json",
+  ".web-design/policy/package-lock.json",
+  ".web-design/policy/package.json",
   "scripts/check-managed-files.mjs",
   "scripts/check-baseline-change.mjs",
   "scripts/check-repository.mjs",
@@ -67,6 +81,8 @@ const PERSONAL_PATH_PATTERNS = [
   /\/home\/[A-Za-z0-9._-]+\//,
   /[A-Za-z]:\\Users\\[A-Za-z0-9._-]+\\/
 ];
+
+const KNOWN_NO_OP_COMMAND = /^(?:(?:true|:|exit\s+0|echo(?:\s+.*)?|printf(?:\s+.*)?)(?:\s*(?:&&|;)\s*)?)+$/;
 
 function parseRoot(argv = process.argv.slice(2)) {
   const index = argv.indexOf("--root");
@@ -119,6 +135,24 @@ export function validateProjectConfig(config, profiles = []) {
     failures.push("commands.check must be an array");
   } else if (config?.governance?.mode === "consumer" && config.commands.check.length === 0) {
     failures.push("consumer projects must configure at least one product check");
+  } else {
+    for (const [index, check] of config.commands.check.entries()) {
+      if (!check || typeof check !== "object" || Array.isArray(check)) {
+        failures.push(`commands.check[${index}] must be an object`);
+        continue;
+      }
+      if (typeof check.name !== "string" || !check.name.trim()) {
+        failures.push(`commands.check[${index}].name must be a non-empty string`);
+      }
+      if (typeof check.run !== "string" || !check.run.trim()) {
+        failures.push(`commands.check[${index}].run must be a non-empty string`);
+        continue;
+      }
+      const normalized = check.run.trim().replace(/\s+/g, " ");
+      if (KNOWN_NO_OP_COMMAND.test(normalized)) {
+        failures.push(`commands.check[${index}].run must execute a real product check`);
+      }
+    }
   }
   const rootDirectory = config?.deployment?.rootDirectory;
   const normalizedRoot = typeof rootDirectory === "string" ? normalize(rootDirectory) : "";
@@ -146,23 +180,262 @@ export function validateProjectConfig(config, profiles = []) {
   return failures;
 }
 
+function mapPair(map, key) {
+  if (!isMap(map)) return null;
+  return map.items.find((pair) => isScalar(pair.key) && pair.key.value === key) ?? null;
+}
+
+function unsupportedSecurityConstructs(node, kinds = new Set()) {
+  if (!node) return kinds;
+  if (isAlias(node)) {
+    kinds.add("alias");
+    return kinds;
+  }
+  if (node.anchor) kinds.add("anchor");
+  if (node.tag) kinds.add("tag");
+  if (isScalar(node) && new Set(["BLOCK_FOLDED", "BLOCK_LITERAL"]).has(node.type)) {
+    kinds.add("block scalar");
+  }
+  if (isMap(node)) {
+    for (const pair of node.items) {
+      if (isScalar(pair.key) && pair.key.value === "<<") kinds.add("merge key");
+      unsupportedSecurityConstructs(pair.key, kinds);
+      unsupportedSecurityConstructs(pair.value, kinds);
+    }
+  } else if (isSeq(node)) {
+    for (const item of node.items) unsupportedSecurityConstructs(item, kinds);
+  }
+  return kinds;
+}
+
+function unsupportedJobTreeConstructs(node, kinds = new Set()) {
+  if (!node) return kinds;
+  if (isAlias(node)) {
+    kinds.add("alias");
+    return kinds;
+  }
+  if (node.anchor) kinds.add("anchor");
+  if (node.tag) kinds.add("tag");
+  if (isMap(node)) {
+    for (const pair of node.items) {
+      if (isScalar(pair.key) && pair.key.value === "<<") kinds.add("merge key");
+      unsupportedJobTreeConstructs(pair.key, kinds);
+      unsupportedJobTreeConstructs(pair.value, kinds);
+    }
+  } else if (isSeq(node)) {
+    for (const item of node.items) unsupportedJobTreeConstructs(item, kinds);
+  }
+  return kinds;
+}
+
+function workflowEvents(node, failures, path) {
+  const events = new Set();
+  for (const kind of unsupportedSecurityConstructs(node)) {
+    failures.push(`Workflow trigger uses unsupported YAML ${kind}: ${path}`);
+  }
+  if (isScalar(node) && typeof node.value === "string") {
+    events.add(node.value);
+  } else if (isSeq(node)) {
+    for (const item of node.items) {
+      if (!isScalar(item) || typeof item.value !== "string") {
+        failures.push(`Workflow trigger list must contain event names: ${path}`);
+        continue;
+      }
+      events.add(item.value);
+    }
+  } else if (isMap(node)) {
+    for (const pair of node.items) {
+      if (!isScalar(pair.key) || typeof pair.key.value !== "string") {
+        failures.push(`Workflow trigger map must use event-name keys: ${path}`);
+        continue;
+      }
+      events.add(pair.key.value);
+    }
+  } else {
+    failures.push(`Workflow trigger must be a scalar, sequence, or mapping: ${path}`);
+  }
+  return events;
+}
+
+function permissionWrites(node, scope, failures, path) {
+  for (const kind of unsupportedSecurityConstructs(node)) {
+    failures.push(`Workflow ${scope} use unsupported YAML ${kind}: ${path}`);
+  }
+  if (isScalar(node)) {
+    if (!new Set(["read-all", "write-all"]).has(node.value)) {
+      failures.push(`Workflow ${scope} must be read-all, write-all, or a permission map: ${path}`);
+    }
+    return node.value === "write-all";
+  }
+  if (!isMap(node)) {
+    failures.push(`Workflow ${scope} must be a permission map: ${path}`);
+    return true;
+  }
+  let writes = false;
+  for (const pair of node.items) {
+    if (!isScalar(pair.key) || typeof pair.key.value !== "string") {
+      failures.push(`Workflow ${scope} must use scalar permission keys: ${path}`);
+      writes = true;
+      continue;
+    }
+    if (!isScalar(pair.value) || !new Set(["read", "write", "none"]).has(pair.value.value)) {
+      failures.push(`Workflow ${scope} has an invalid level for ${pair.key.value}: ${path}`);
+      writes = true;
+      continue;
+    }
+    if (pair.value.value === "write") writes = true;
+  }
+  return writes;
+}
+
+function dispatchOnlyJob(job) {
+  const conditionNode = mapPair(job, "if")?.value;
+  if (!isScalar(conditionNode) || typeof conditionNode.value !== "string") return false;
+  if (conditionNode.anchor || conditionNode.tag) return false;
+  const condition = conditionNode.value.replace(/^\$\{\{\s*/, "").replace(/\s*\}\}$/, "").trim();
+  if (condition.includes("||") || condition.includes("?")) return false;
+  const parts = condition.split(/\s*&&\s*/);
+  const dispatchEvent = parts.some((part) =>
+    /^\(*\s*github\.event_name\s*==\s*["']workflow_dispatch["']\s*\)*$/.test(part)
+  );
+  const defaultBranch = parts.some((part) =>
+    /^\(*\s*github\.ref\s*==\s*format\(\s*["']refs\/heads\/\{0\}["']\s*,\s*github\.event\.repository\.default_branch\s*\)\s*\)*$/.test(part)
+  );
+  return dispatchEvent && defaultBranch;
+}
+
+function directUnsupportedConstructs(node, { blockScalar = false, mergeKey = false } = {}) {
+  const kinds = new Set();
+  if (!node) return kinds;
+  if (isAlias(node)) kinds.add("alias");
+  if (node.anchor) kinds.add("anchor");
+  if (node.tag) kinds.add("tag");
+  if (blockScalar && isScalar(node) && new Set(["BLOCK_FOLDED", "BLOCK_LITERAL"]).has(node.type)) {
+    kinds.add("block scalar");
+  }
+  if (mergeKey && isMap(node) && node.items.some((pair) => isScalar(pair.key) && pair.key.value === "<<")) {
+    kinds.add("merge key");
+  }
+  return kinds;
+}
+
+function validateMappingKeys(map, scope, failures, path) {
+  if (!isMap(map)) return;
+  for (const pair of map.items) {
+    const kinds = directUnsupportedConstructs(pair.key, { blockScalar: true });
+    if (isScalar(pair.key) && pair.key.value === "<<") kinds.add("merge key");
+    for (const kind of kinds) {
+      failures.push(`Workflow ${scope} key uses unsupported YAML ${kind}: ${path}`);
+    }
+    if (!isScalar(pair.key) || typeof pair.key.value !== "string") {
+      failures.push(`Workflow ${scope} keys must be undecorated string scalars: ${path}`);
+    }
+  }
+}
+
+function validateActionReference(node, failures, path) {
+  for (const kind of directUnsupportedConstructs(node, { blockScalar: true })) {
+    failures.push(`Workflow uses value uses unsupported YAML ${kind}: ${path}`);
+  }
+  if (!isScalar(node) || typeof node.value !== "string") {
+    failures.push(`Workflow uses value must be a scalar action reference: ${path}`);
+    return;
+  }
+  const action = node.value;
+  if (action.startsWith("./")) return;
+  if (action.startsWith("docker://")) {
+    if (!/^docker:\/\/[^@\s]+@sha256:[a-f0-9]{64}$/.test(action)) {
+      failures.push(`Docker action is not pinned to an immutable SHA-256 digest in ${path}: ${action}`);
+    }
+    return;
+  }
+  const ref = action.slice(action.lastIndexOf("@") + 1);
+  if (!/^[a-f0-9]{40}$/.test(ref)) {
+    failures.push(`GitHub Action is not pinned to a full commit SHA in ${path}: ${action}`);
+  }
+}
+
 export function validateWorkflowText(path, text) {
   const failures = [];
-  if (/\bpull_request_target\b/.test(text)) {
-    failures.push(`High-risk pull_request_target trigger in ${path}`);
+  const document = parseDocument(text, {
+    keepSourceTokens: true,
+    prettyErrors: false,
+    strict: true,
+    uniqueKeys: true
+  });
+  for (const error of document.errors) {
+    failures.push(`Invalid workflow YAML (${error.code}): ${path}: ${error.message}`);
   }
-  if (!/^permissions:\s*(?:\n|$)/m.test(text)) {
-    failures.push(`Workflow must declare top-level permissions: ${path}`);
+  for (const warning of document.warnings) {
+    failures.push(`Unsupported workflow YAML (${warning.code}): ${path}: ${warning.message}`);
   }
-  if (/^permissions:\s*["']?write-all["']?\s*$/m.test(text)) {
-    failures.push(`Workflow may not use write-all permissions: ${path}`);
-  }
-  for (const match of text.matchAll(/^\s*-?\s*uses:\s*["']?([^\s"']+)["']?\s*(?:#.*)?$/gm)) {
-    const action = match[1];
-    if (action.startsWith("./") || action.startsWith("docker://")) continue;
-    const ref = action.slice(action.lastIndexOf("@") + 1);
-    if (!/^[a-f0-9]{40}$/.test(ref)) {
-      failures.push(`GitHub Action is not pinned to a full commit SHA in ${path}: ${action}`);
+  const root = document.contents;
+  if (!isMap(root)) {
+    failures.push(`Workflow document root must be a mapping: ${path}`);
+  } else if (document.errors.length === 0) {
+    validateMappingKeys(root, "root mapping", failures, path);
+    const onPair = mapPair(root, "on");
+    const events = onPair ? workflowEvents(onPair.value, failures, path) : new Set();
+    if (!onPair) failures.push(`Workflow must declare triggers: ${path}`);
+    if (events.has("pull_request_target")) {
+      failures.push(`High-risk pull_request_target trigger in ${path}`);
+    }
+    const pullRequest = events.has("pull_request");
+    const topPermissions = mapPair(root, "permissions");
+    if (!topPermissions) {
+      failures.push(`Workflow must declare top-level permissions: ${path}`);
+    } else {
+      const writes = permissionWrites(topPermissions.value, "top-level permissions", failures, path);
+      if (isScalar(topPermissions.value) && topPermissions.value.value === "write-all") {
+        failures.push(`Workflow may not use write-all permissions: ${path}`);
+      }
+      if (pullRequest && writes) {
+        failures.push(`Pull-request workflow may not grant top-level write permissions: ${path}`);
+      }
+    }
+    const jobs = mapPair(root, "jobs")?.value;
+    if (jobs !== undefined && !isMap(jobs)) {
+      failures.push(`Workflow jobs must be a mapping: ${path}`);
+    } else if (isMap(jobs)) {
+      for (const kind of unsupportedJobTreeConstructs(jobs)) {
+        failures.push(`Workflow jobs use unsupported YAML ${kind}: ${path}`);
+      }
+      validateMappingKeys(jobs, "jobs mapping", failures, path);
+      for (const jobPair of jobs.items) {
+        const jobName = isScalar(jobPair.key) && typeof jobPair.key.value === "string"
+          ? jobPair.key.value
+          : "<invalid>";
+        if (!isMap(jobPair.value)) {
+          failures.push(`Workflow job ${jobName} must be a mapping: ${path}`);
+          continue;
+        }
+        validateMappingKeys(jobPair.value, `job ${jobName} mapping`, failures, path);
+        const reusableWorkflow = mapPair(jobPair.value, "uses");
+        if (reusableWorkflow) validateActionReference(reusableWorkflow.value, failures, path);
+        const steps = mapPair(jobPair.value, "steps")?.value;
+        if (steps !== undefined && !isSeq(steps)) {
+          failures.push(`Workflow job ${jobName} steps must be a sequence: ${path}`);
+        } else if (isSeq(steps)) {
+          for (const step of steps.items) {
+            for (const kind of directUnsupportedConstructs(step, { mergeKey: true })) {
+              failures.push(`Workflow job ${jobName} step uses unsupported YAML ${kind}: ${path}`);
+            }
+            if (!isMap(step)) {
+              failures.push(`Workflow job ${jobName} step must be a mapping: ${path}`);
+              continue;
+            }
+            validateMappingKeys(step, `job ${jobName} step mapping`, failures, path);
+            const uses = mapPair(step, "uses");
+            if (uses) validateActionReference(uses.value, failures, path);
+          }
+        }
+        const jobPermissions = mapPair(jobPair.value, "permissions");
+        if (!jobPermissions) continue;
+        const writes = permissionWrites(jobPermissions.value, `job ${jobName} permissions`, failures, path);
+        if (pullRequest && writes && !dispatchOnlyJob(jobPair.value)) {
+          failures.push(`Pull-request job ${jobName} may not grant write permissions: ${path}`);
+        }
+      }
     }
   }
   return failures;

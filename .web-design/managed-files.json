@@ -12,6 +12,8 @@
     ".github/workflows/repository-guard.yml",
     ".github/workflows/web-design-update.yml",
     ".web-design/managed-files.json",
+    ".web-design/policy/package-lock.json",
+    ".web-design/policy/package.json",
     ".web-design/profiles/custom-production.json",
     ".web-design/profiles/next-cloudflare.json",
     ".web-design/profiles/no-deploy.json",

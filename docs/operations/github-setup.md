@@ -22,11 +22,11 @@ After the first green workflow run:
    `workflow_run` jobs, never by a pull-request job. Rotate it independently.
 5. Configure the Codex repository environment/application, then request a review
    for the current full PR head SHA.
-6. Protect `main` with pull requests, required Code Owner review, conversation
-   resolution, no force pushes, no branch deletion, stale approval dismissal,
-   and the actual check names from `.web-design/project.json`. Do not register a
-   required check before it has run. Keep `.github/CODEOWNERS` aligned with the
-   repository owner.
+6. When the repository plan supports it, protect `main` with pull requests,
+   required Code Owner review, conversation resolution, no force pushes, no
+   branch deletion, stale approval dismissal, and the actual check names from
+   `.web-design/project.json`. Do not register a required check before it has
+   run. Keep `.github/CODEOWNERS` aligned with the repository owner.
    `baseline-source-verification` is published against the PR head by a trusted
    default-branch `workflow_run`; require that exact check name after its first
    successful run.
@@ -35,8 +35,19 @@ After the first green workflow run:
 8. Keep deployment secrets in environment-scoped stores and restrict production
    environments to `main` plus any required human approval.
 
-Some private-repository plans do not expose every protection. Record the missing
-control instead of claiming it is active.
+Some private-repository plans do not expose branch protection or rulesets and
+may return `403` from their APIs. Record the missing control instead of claiming
+it is active. Do not make a private repository public to unlock a protection
+feature.
+
+When enforced protection is unavailable, the repository owner must apply the
+completion contract manually before every merge: record the exact full head SHA;
+confirm that every contractual check is successful on that same head; confirm
+that every P0-P2 review finding is resolved; then observe a 120-second quiet
+period and fetch the PR again. Immediately before merging, recheck that the head
+SHA is unchanged, the same checks are still green, and no unresolved P0-P2
+thread or newer blocking review has appeared. This documented procedure is a
+mandatory fallback, not a claim that the branch is technically protected.
 
 For organization-owned repositories, prefer an organization ruleset with a
 required workflow or a GitHub App check for the strongest immutable guard. In a

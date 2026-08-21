@@ -26,6 +26,12 @@ The workflow's ownership-change option defaults to off. Normal pull-request
 checks use policy from the trusted default branch and verify the proposed new
 updater before it can become trusted for a later update.
 
+After applying or checking out an update, run
+`npm ci --ignore-scripts --prefix .web-design/policy` before any structural
+repository check or `npm run preflight`. The dependency and lockfile under
+`.web-design/policy/` are managed baseline files; the consumer's root package
+files remain project-owned and must stay byte-for-byte unchanged by the updater.
+
 For a private `web-design` source, the consumer stores a read-only
 `WEB_DESIGN_READ_TOKEN` as described in `github-setup.md`. The token is not
 available to `pull_request` jobs. After the read-only Repository Guard finishes,

@@ -214,6 +214,35 @@ function rollback(applied) {
   }
 }
 
+function installedBaselineState(target, lock) {
+  const ownership = ownershipPaths(target);
+  const validLockFiles = Boolean(lock?.files) && typeof lock.files === "object" && !Array.isArray(lock.files);
+  const lockFiles = validLockFiles ? lock.files : {};
+  const lockedPaths = new Set(Object.keys(lockFiles));
+  const bootstrap = validLockFiles && lock?.sourceCommit === null && ownership.size === 0 && lockedPaths.size === 0;
+  const conflicts = [];
+  if (!validLockFiles) conflicts.push(".web-design/lock.json (invalid files map)");
+  if (!bootstrap && (
+    ownership.size !== lockedPaths.size ||
+    [...ownership].some((path) => !lockedPaths.has(path))
+  )) {
+    conflicts.push(".web-design/lock.json (ownership mismatch)");
+  }
+  if (!bootstrap) {
+    for (const [path, expected] of Object.entries(lockFiles)) {
+      if (!safeManagedPath(path) || !/^[a-f0-9]{64}$/.test(expected)) {
+        conflicts.push(".web-design/lock.json (invalid managed entry)");
+        continue;
+      }
+      const destination = assertNoSymlinkComponents(target, path);
+      if (!existsSync(destination) || sha256(readFileSync(destination)) !== expected) {
+        conflicts.push(path);
+      }
+    }
+  }
+  return { bootstrap, conflicts: [...new Set(conflicts)], ownership };
+}
+
 export async function syncProject({
   command,
   targetRoot,
@@ -228,24 +257,12 @@ export async function syncProject({
   const target = resolve(targetRoot);
   const lockPath = assertNoSymlinkComponents(target, ".web-design/lock.json", { finalMustExist: true });
   const lock = JSON.parse(readFileSync(lockPath, "utf8"));
+  const installed = installedBaselineState(target, lock);
   if (command === "status") {
-    const installedOwnership = ownershipPaths(target);
-    const lockedPaths = new Set(Object.keys(lock.files ?? {}));
-    const conflicts = [];
-    if (
-      installedOwnership.size !== lockedPaths.size ||
-      [...installedOwnership].some((path) => !lockedPaths.has(path))
-    ) {
-      conflicts.push(".web-design/lock.json (ownership mismatch)");
-    }
-    for (const [path, expected] of Object.entries(lock.files ?? {})) {
-      const destination = assertNoSymlinkComponents(target, path);
-      if (!existsSync(destination) || sha256(readFileSync(destination)) !== expected) conflicts.push(path);
-    }
-    return { conflicts, changes: [] };
+    return { conflicts: installed.conflicts, changes: [] };
   }
-
-  const installedOwnership = ownershipPaths(target);
+  if (installed.conflicts.length) return { conflicts: installed.conflicts, changes: [] };
+  const installedOwnership = installed.ownership;
   let downloaded;
   try {
     let source = sourceRoot ? resolve(sourceRoot) : null;
@@ -261,8 +278,14 @@ export async function syncProject({
       const currentHash = existsSync(destination) ? sha256(readFileSync(destination)) : null;
       const previousHash = lock.files?.[file.path] ?? null;
       if (currentHash === file.sha256) changes.push({ path: file.path, action: "same" });
-      else if (currentHash === null && (!previousHash || acceptOwnershipChange)) {
+      else if (currentHash === null && release.additions.includes(file.path)) {
         changes.push({ path: file.path, action: "create" });
+      } else if (
+        installed.bootstrap &&
+        file.path === ".web-design/managed-files.json" &&
+        release.additions.includes(file.path)
+      ) {
+        changes.push({ path: file.path, action: "update" });
       } else if (previousHash && currentHash === previousHash) {
         changes.push({ path: file.path, action: "update" });
       } else conflicts.push(file.path);

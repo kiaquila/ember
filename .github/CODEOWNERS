@@ -1,10 +1,7 @@
 # Shared baseline trust boundary. Enable required Code Owner review in the ruleset.
-/.github/CODEOWNERS @kiaquila
-/.github/workflows/ @kiaquila
-/.web-design/managed-files.json @kiaquila
-/.web-design/profiles/ @kiaquila
+/.github/ @kiaquila
+/.web-design/ @kiaquila
+/docs/operations/ @kiaquila
 /docs/standards/ @kiaquila
-/scripts/check-baseline-change.mjs @kiaquila
-/scripts/check-managed-files.mjs @kiaquila
-/scripts/check-repository.mjs @kiaquila
-/scripts/sync-project.mjs @kiaquila
+/scripts/ @kiaquila
+/tests/ @kiaquila

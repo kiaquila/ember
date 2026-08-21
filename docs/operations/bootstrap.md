@@ -1,6 +1,9 @@
 # Bootstrap and adoption
 
-For a new repository, use the GitHub template and run `npm run setup` with a
+For a new repository, use the GitHub template, install the managed policy's
+pinned dependency with
+`npm ci --ignore-scripts --prefix .web-design/policy`, and then run
+`npm run setup` with a
 lower-case kebab-case slug, one profile, the exact 40-character SHA of the
 immutable `web-design` release used by the template, and one or more real check
 commands. Pass the release identity as `--source-commit <sha>`; setup refuses to
@@ -19,5 +22,8 @@ updates may not bundle project-owned changes.
 For an existing repository, work in an isolated migration branch. Preserve its
 history, README, instructions, assets, application code, deploy configuration,
 and verified facts. Add the baseline as a separate reviewable commit, configure
-the project, run both old and new checks, and confirm that no other customer
-project or monorepository-only workflow was imported.
+the project, run `npm ci --ignore-scripts --prefix .web-design/policy` once, run
+both old and new checks, and confirm that no other customer project or
+monorepository-only workflow was imported. The isolated policy install must not
+replace, rewrite, or claim ownership of the consumer's root `package.json` or
+lockfile.

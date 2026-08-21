@@ -5,7 +5,8 @@
   "scripts": {
     "check": "node scripts/check-repository.mjs && node scripts/check-managed-files.mjs",
     "test": "node scripts/test-web-design.mjs",
-    "preflight": "npm run check && npm test",
+    "policy:install": "npm ci --ignore-scripts --prefix .web-design/policy",
+    "preflight": "npm run policy:install && npm run check && npm test",
     "setup": "node scripts/bootstrap-project.mjs",
     "project:check": "node scripts/run-project-checks.mjs",
     "sync:web-design": "node scripts/sync-project.mjs",
