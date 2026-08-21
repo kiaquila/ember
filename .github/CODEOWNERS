@@ -1,0 +1,7 @@
+# Shared baseline trust boundary. Enable required Code Owner review in the ruleset.
+/.github/ @kiaquila
+/.web-design/ @kiaquila
+/docs/operations/ @kiaquila
+/docs/standards/ @kiaquila
+/scripts/ @kiaquila
+/tests/ @kiaquila

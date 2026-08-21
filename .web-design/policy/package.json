@@ -1,0 +1,10 @@
+{
+  "name": "web-design-managed-policy",
+  "private": true,
+  "dependencies": {
+    "yaml": "2.9.0"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "ember",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node scripts/check-repository.mjs && node scripts/check-managed-files.mjs",
+    "test": "node scripts/test-web-design.mjs",
+    "policy:install": "npm ci --ignore-scripts --prefix .web-design/policy",
+    "preflight": "npm run policy:install && npm run check && npm test",
+    "setup": "node scripts/bootstrap-project.mjs",
+    "project:check": "node scripts/run-project-checks.mjs",
+    "sync:web-design": "node scripts/sync-project.mjs",
+    "manifest:web-design": "node scripts/build-release-manifest.mjs"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "description": "Ember — an interactive burn study for the ks·design lab"
+}

@@ -1,0 +1,190 @@
+{
+  "schemaVersion": 1,
+  "version": "0.1.0-dev",
+  "files": [
+    {
+      "path": ".github/CODEOWNERS",
+      "sha256": "f8446f5baffd70a7df055eaa9c26f855ea8a9e2f3063e0035615c03580b83074"
+    },
+    {
+      "path": ".github/pull_request_template.md",
+      "sha256": "36fbe73d6f56406ee98f07799253b0dff427ee3c38ddb43d8f7332e07c0b7d7f"
+    },
+    {
+      "path": ".github/workflows/baseline-source-verification.yml",
+      "sha256": "a1ecfad0db68f9f4180de79f66f71dd167e96b556bf0c299bb620cbe57cb9d93"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "sha256": "b64acf683401f3f79abd177a25e54be3d63d0371950bfce5f741d039b32b55d3"
+    },
+    {
+      "path": ".github/workflows/codex-review-request.yml",
+      "sha256": "0cdd54876071e88763afd71871cf27b70555110918f3df4b7afd98814d865353"
+    },
+    {
+      "path": ".github/workflows/codex-review-rerun.yml",
+      "sha256": "ac0dd32e0f6907e978325671652c55b6ab101acd494155be716fa33656cfd28d"
+    },
+    {
+      "path": ".github/workflows/codex-review.yml",
+      "sha256": "12517894b7995189e4097d2a3d41f5d4d1b5eee74c4dbfd2f485f3692f04037c"
+    },
+    {
+      "path": ".github/workflows/osv-scan.yml",
+      "sha256": "1edebfbd331ff726c2e31aeb4edb1943ea78e1a75ddda4fdec3c395a753524ff"
+    },
+    {
+      "path": ".github/workflows/repository-guard.yml",
+      "sha256": "f5e911e5ba0d56d16ac8f33b4d8ab7e1887d9b58c1090511df25ae7d41c9e764"
+    },
+    {
+      "path": ".github/workflows/web-design-update.yml",
+      "sha256": "73f7cb30331cc3ac5d76a33582483cc5fea0b38f83c78f98ccaeba026649f702"
+    },
+    {
+      "path": ".web-design/managed-files.json",
+      "sha256": "c193a03069891b20b32de763d6b37e3a22aeca6aa683f614543928007c4de2f2"
+    },
+    {
+      "path": ".web-design/profiles/custom-production.json",
+      "sha256": "98a969099629aae05e9a92164319be16a2d572f0f7f2e3cd1d95eab5d0c3f8d2"
+    },
+    {
+      "path": ".web-design/profiles/next-cloudflare.json",
+      "sha256": "29d2d133e187eeee033648572ab6c94bf45eeebb74b4f3f7650073aaa16f97e9"
+    },
+    {
+      "path": ".web-design/profiles/no-deploy.json",
+      "sha256": "3459c52924db392e817276655a8c263bc0729321935f1d8ac3c67f4a93caa2a3"
+    },
+    {
+      "path": ".web-design/profiles/static-cloudflare.json",
+      "sha256": "0a34966229dcf3fa87ea66c75e0e932015e8a4595088d94b6c7f18d8105b6b15"
+    },
+    {
+      "path": ".web-design/profiles/static-vercel.json",
+      "sha256": "f658fc3d928b49872ab956a9a802419bc55c671e89f2ba9d35971fb533162004"
+    },
+    {
+      "path": "docs/operations/bootstrap.md",
+      "sha256": "dd8dba71ba95eedf95f6eac67bb3cc6ba2f26eefdc01cbd1a2abfc92ee455410"
+    },
+    {
+      "path": "docs/operations/cloudflare.md",
+      "sha256": "70d6ab3e6fc74164ab5b510918008f2d3794556293a62be07445a5af0093c9d3"
+    },
+    {
+      "path": "docs/operations/github-setup.md",
+      "sha256": "70731c042b9549fa484c12ce5eb6a9b0e47d976cb8d1adf78e7ee4f6c4d5f5c7"
+    },
+    {
+      "path": "docs/operations/project-handoff.md",
+      "sha256": "36d7fc1f52ab9ee5d4a81be55d799942ebb6971c327414c385f8f79b8e070414"
+    },
+    {
+      "path": "docs/operations/updates.md",
+      "sha256": "27ef0b519f2de4c905f1150e770e49bfe684ec2675fc434c7457891db3e26663"
+    },
+    {
+      "path": "docs/standards/content-and-design.md",
+      "sha256": "97026c6f26f7e78ce31a756fd8d7c5f37d684f5f7ef87de2f8774c26b7cfebe7"
+    },
+    {
+      "path": "docs/standards/deployment.md",
+      "sha256": "47f5e60bb1db48216738ac28e1881df7fdfc75fa245cdfb5fd330ec4ff6e7903"
+    },
+    {
+      "path": "docs/standards/git-and-reviews.md",
+      "sha256": "b5077b9b4b4f939fcbf57ffca190914f62e8115c06a02fa7596c26a58bd9b6ec"
+    },
+    {
+      "path": "docs/standards/project-structure.md",
+      "sha256": "07f8ca697f6afc97aad10ecdfe3e62ed493e1f78186685c36407b5398c4df6d6"
+    },
+    {
+      "path": "docs/standards/security.md",
+      "sha256": "05c681acebefb6e1d40bbaa782e11f60a6738fd424fccda75f149637c10c9f4d"
+    },
+    {
+      "path": "docs/standards/testing.md",
+      "sha256": "4419cf5da4affc47a61177ee3a9f833596f844dea7ddf236ac862ca36cf2941b"
+    },
+    {
+      "path": "scripts/bootstrap-project.mjs",
+      "sha256": "9e43b3f1942ebf950532da800810e747eb3e0b96515608fbcc5ce86fae3834ac"
+    },
+    {
+      "path": "scripts/check-baseline-change.mjs",
+      "sha256": "9a225d5b2367410952662e7eb427728c0abe96e7a4d5f89271c0a2cdbca53aa3"
+    },
+    {
+      "path": "scripts/check-managed-files.mjs",
+      "sha256": "25ebeb32c9fcde47345d617958382827e696f8dd38d78ade0379c228bf819bb4"
+    },
+    {
+      "path": "scripts/check-repository.mjs",
+      "sha256": "545038ce46f89a97cae6bbe115f96f9e2f05aa8870cb2ef9da034e93d4cac706"
+    },
+    {
+      "path": "scripts/codex-review-gate.mjs",
+      "sha256": "e2b2dfd295b7b1773a10bf07f92c86868136104787a069606f0e45cab3f8f5cc"
+    },
+    {
+      "path": "scripts/codex-review-helpers.mjs",
+      "sha256": "ccc54e5bc89d66523451a3e467d107084e59068341546db03999ea2635266a5f"
+    },
+    {
+      "path": "scripts/codex-review-request.mjs",
+      "sha256": "4c5fd8dbd50728474a5008657d46e32cfa81861ccc181b6619b3f98dd29d1022"
+    },
+    {
+      "path": "scripts/codex-review-rerun.mjs",
+      "sha256": "98d568959fd1430e199d93a01889ba65e0e08f1a41bbdcca44d9e4c421e69aae"
+    },
+    {
+      "path": "scripts/publish-codex-review-check.mjs",
+      "sha256": "2a2680abddf08119e6142b4e0d3d847791119914ceedb5c1d89300470f073520"
+    },
+    {
+      "path": "scripts/run-project-checks.mjs",
+      "sha256": "91c013b809679aada2c1d1b10fef6724b8ef495029fe98957d3aa30ce5b2cb5e"
+    },
+    {
+      "path": "scripts/sync-project.mjs",
+      "sha256": "9c37d74d002f601b55b84d2fca228b3b13b6bb1b95e16ba0f69ea5d5501d342c"
+    },
+    {
+      "path": "scripts/test-web-design.mjs",
+      "sha256": "d566c2f201855f0431965d4f6c91277e23eb60cfc360f159df16db61e10a9342"
+    },
+    {
+      "path": "tests/baseline-change.test.mjs",
+      "sha256": "a5f8f23d4a4345513220725ef81394a11f55d46408604802817e2930c8e1136e"
+    },
+    {
+      "path": "tests/bootstrap-project.test.mjs",
+      "sha256": "48d22913f009e3bc131c1734cb4b2268f8c54c580c3b11e43f762054e6df47f7"
+    },
+    {
+      "path": "tests/codex-review-gate.test.mjs",
+      "sha256": "1156864577f9a48b83ac57a0aef2e366c676b33949600fd130347a3360d52d5b"
+    },
+    {
+      "path": "tests/managed-files.test.mjs",
+      "sha256": "6b641ed06bcef07b741b06cfae7afc713a2aa22262ac04199ee0130e902c410d"
+    },
+    {
+      "path": "tests/profiles.test.mjs",
+      "sha256": "9e8f6931cc07d0b5e450bbf6737c4df2ee40f20659b5272206b00d2b146501b5"
+    },
+    {
+      "path": "tests/repository-guard-v2.test.mjs",
+      "sha256": "1cdb1491b65f9801bb9ac86f522bd7414aba84580ae0c7c3f76822931e5d5d00"
+    },
+    {
+      "path": "tests/sync-project.test.mjs",
+      "sha256": "ce77f30e6769fa4e47d1e328efa789b2457cd53def3038a6f8ba1b3ade06a60f"
+    }
+  ]
+}
