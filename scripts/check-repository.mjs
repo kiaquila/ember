@@ -96,6 +96,8 @@ const PERSONAL_PATH_PATTERNS = [
 // the project runs, where the code is reviewed rather than quoted.
 const KNOWN_NO_OP_COMMAND = /^(?:true|:|exit\s+0|echo(?:\s+.*)?|printf(?:\s+.*)?)$/;
 const SHELL_CONTROL_CHARACTERS = /[;|&`<>(){}$\\]/;
+// `! npm test` succeeds precisely when the product tests fail.
+const SHELL_NEGATION = /(?:^|[\s;&|(])!(?:\s|$)/;
 
 function splitOutsideQuotes(command) {
   const segments = [];
@@ -148,6 +150,29 @@ function outsideQuotes(command) {
 // compared rather than pattern-matched so a wrapper (`env sh -c`), a path
 // (`/bin/sh -c`), and combined flags (`sh -ec`) are all caught.
 const SHELL_NAMES = new Set(["sh", "bash", "zsh", "dash", "ksh", "csh", "tcsh", "fish"]);
+
+// `command true` and `env true` run `true`. These wrappers pass their arguments
+// through to another executable, so the word that decides the exit status is
+// behind them and the no-op test has to look there.
+const COMMAND_WRAPPERS = new Set([
+  "command", "env", "exec", "nice", "ionice", "nohup", "stdbuf", "time", "timeout", "xargs"
+]);
+
+function unwrapCommandWrappers(command) {
+  const tokens = command.split(/\s+/).filter(Boolean);
+  let index = 0;
+  while (index < tokens.length) {
+    const name = tokens[index].slice(tokens[index].lastIndexOf("/") + 1);
+    if (!COMMAND_WRAPPERS.has(name)) break;
+    index += 1;
+    // Step over the wrapper's own options and their values: `timeout 60`,
+    // `nice -n 5`, `env FOO=bar`. Anything containing `=` is an assignment.
+    while (index < tokens.length && (tokens[index].startsWith("-") || /=/.test(tokens[index]) || /^\d+$/.test(tokens[index]))) {
+      index += 1;
+    }
+  }
+  return tokens.slice(index).join(" ");
+}
 
 function executesNestedShell(bareSegment) {
   const tokens = bareSegment.split(/\s+/).filter(Boolean);
@@ -216,6 +241,9 @@ export function validateProductCheckCommand(command) {
     if (SHELL_CONTROL_CHARACTERS.test(bare)) {
       return "must join commands only with && and use no other shell operators";
     }
+    if (SHELL_NEGATION.test(bare)) {
+      return "must not invert a command's exit status";
+    }
     if (hasExpansionOutsideSingleQuotes(trimmed)) {
       return "must not expand anything outside single quotes";
     }
@@ -224,7 +252,9 @@ export function validateProductCheckCommand(command) {
     if (executesNestedShell(unquoted)) {
       return "must not hand shell text to another shell";
     }
-    if (KNOWN_NO_OP_COMMAND.test(unquoted)) return "must execute a real product check";
+    if (KNOWN_NO_OP_COMMAND.test(unwrapCommandWrappers(unquoted))) {
+      return "must execute a real product check";
+    }
   }
   return null;
 }
@@ -565,7 +595,10 @@ function stepExecutesFromDirectory(step, directory, jobDefaultsEnterTree) {
   return (
     new RegExp(`(?:^|[\\s;&|(])(?:[^\\s;&|(]*/)?${quoted}/`, "m").test(run.value) ||
     new RegExp(`(?:^|[\\s;&|(])(?:${interpreters})\\s+\\S*${quoted}/`, "m").test(run.value) ||
-    new RegExp(`--prefix\\s+\\S*${quoted}(?:\\s|$|["'])`, "m").test(run.value)
+    new RegExp(`--prefix\\s+\\S*${quoted}(?:\\s|$|["'])`, "m").test(run.value) ||
+    // Changing into the tree makes every later command in that step run there,
+    // and the directory has no trailing slash in `cd .proposed && npm ci`.
+    new RegExp(`(?:^|[\\s;&|(])(?:cd|pushd)\\s+["']?(?:\\./)*${quoted}(?:/|["']|\\s|$)`, "m").test(run.value)
   );
 }
 
@@ -666,6 +699,11 @@ export function validateWorkflowText(path, text) {
       event === "push" ? !trustedPush : REF_SELECTABLE_EVENTS.has(event)
     );
     let topLevelWrites = false;
+    const rootDefaults = mapPair(root, "defaults")?.value;
+    const rootRunDefaults = isMap(rootDefaults) ? mapPair(rootDefaults, "run")?.value : undefined;
+    const rootWorkingDirectory = isMap(rootRunDefaults)
+      ? mapPair(rootRunDefaults, "working-directory")?.value
+      : undefined;
     const topPermissions = mapPair(root, "permissions");
     if (!topPermissions) {
       failures.push(`Workflow must declare top-level permissions: ${path}`);
@@ -739,13 +777,16 @@ export function validateWorkflowText(path, text) {
             }
             isolated.push(directory);
           }
+          // A job's own defaults win, but a workflow-level default applies to
+          // every job that does not override it.
           const jobDefaults = mapPair(jobPair.value, "defaults")?.value;
           const jobRunDefaults = isMap(jobDefaults) ? mapPair(jobDefaults, "run")?.value : undefined;
           const jobWorkingDirectory = isMap(jobRunDefaults)
             ? mapPair(jobRunDefaults, "working-directory")?.value
             : undefined;
+          const effectiveWorkingDirectory = jobWorkingDirectory ?? rootWorkingDirectory;
           for (const directory of isolated) {
-            const defaultsEnterTree = directoryEntersUntrustedTree(jobWorkingDirectory, directory);
+            const defaultsEnterTree = directoryEntersUntrustedTree(effectiveWorkingDirectory, directory);
             for (const step of steps.items) {
               if (isMap(step) && stepExecutesFromDirectory(step, directory, defaultsEnterTree)) {
                 failures.push(

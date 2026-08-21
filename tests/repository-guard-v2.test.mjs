@@ -85,6 +85,43 @@ test("rejects separators that let a failure be discarded", () => {
   }
 });
 
+test("rejects a check that inverts its exit status", () => {
+  for (const run of ["! npm test", "npm test && ! true"]) {
+    const invalid = structuredClone(config);
+    invalid.commands.check = [{ name: "site", run }];
+    assert.deepEqual(
+      validateProjectConfig(invalid, ["no-deploy"]),
+      ["commands.check[0].run must not invert a command's exit status"],
+      run
+    );
+  }
+  for (const run of ['npm test -- --grep "a!b"', "npm run lint!"]) {
+    const valid = structuredClone(config);
+    valid.commands.check = [{ name: "site", run }];
+    assert.deepEqual(validateProjectConfig(valid, ["no-deploy"]), [], run);
+  }
+});
+
+test("a wrapper cannot disguise a no-op command", () => {
+  for (const run of ["command true", "env true", "exec true", "timeout 60 true", "nice -n 5 true", "env FOO=bar true"]) {
+    const invalid = structuredClone(config);
+    invalid.commands.check = [{ name: "site", run }];
+    assert.deepEqual(
+      validateProjectConfig(invalid, ["no-deploy"]),
+      ["commands.check[0].run must execute a real product check"],
+      run
+    );
+  }
+});
+
+test("a wrapper around a real command is still a real check", () => {
+  for (const run of ["command npm test", "env npm test", "timeout 600 npm --prefix website run check"]) {
+    const valid = structuredClone(config);
+    valid.commands.check = [{ name: "site", run }];
+    assert.deepEqual(validateProjectConfig(valid, ["no-deploy"]), [], run);
+  }
+});
+
 test("rejects commands that only report success", () => {
   for (const run of ["true", ":", "exit 0", "echo ok", "printf ok", "npm test && true", "echo ok && npm test"]) {
     const invalid = structuredClone(config);
@@ -620,6 +657,56 @@ test("a local action or dot-mangled directory cannot reach the isolated checkout
     "on: issue_comment\npermissions:\n  contents: write\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n        with:\n          ref: ${{ github.event.pull_request.head.sha }}\n          path: candidate\n      - uses: ./scripts/action\n      - run: npm ci\n        working-directory: candidate-other\n"
   );
   assert.deepEqual(safe, []);
+});
+
+test("a workflow-level run default reaches into the isolated checkout too", () => {
+  const withDefault = (root, job) =>
+    `on: issue_comment\npermissions:\n  contents: write\n${root}jobs:\n  a:\n    runs-on: ubuntu-latest\n${job}    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n        with:\n          ref: \${{ github.event.pull_request.head.sha }}\n          path: candidate\n      - run: npm ci\n`;
+  for (const root of [
+    "defaults:\n  run:\n    working-directory: candidate\n",
+    "defaults:\n  run:\n    working-directory: ././candidate\n"
+  ]) {
+    const failures = validateWorkflowText(".github/workflows/example.yml", withDefault(root, ""));
+    assert.match(failures.join("\n"), /executes code from the untrusted checkout candidate/, root);
+  }
+  // A job default overrides the workflow default, so this one is safe again.
+  assert.deepEqual(
+    validateWorkflowText(
+      ".github/workflows/example.yml",
+      withDefault(
+        "defaults:\n  run:\n    working-directory: candidate\n",
+        "    defaults:\n      run:\n        working-directory: website\n"
+      )
+    ),
+    []
+  );
+  assert.deepEqual(
+    validateWorkflowText(
+      ".github/workflows/example.yml",
+      withDefault("defaults:\n  run:\n    working-directory: website\n", "")
+    ),
+    []
+  );
+});
+
+test("changing directory into an isolated checkout counts as executing from it", () => {
+  for (const run of [
+    "cd .proposed && npm ci",
+    "cd ./.proposed && npm ci",
+    "pushd .proposed && npm ci",
+    "cd .proposed/website && npm ci"
+  ]) {
+    const failures = validateWorkflowText(
+      ".github/workflows/example.yml",
+      `on: issue_comment\npermissions:\n  contents: write\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n        with:\n          ref: \${{ github.event.pull_request.head.sha }}\n          path: .proposed\n      - run: ${run}\n`
+    );
+    assert.match(failures.join("\n"), /executes code from the untrusted checkout \.proposed/, run);
+  }
+  const elsewhere = validateWorkflowText(
+    ".github/workflows/example.yml",
+    "on: issue_comment\npermissions:\n  contents: write\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n        with:\n          ref: ${{ github.event.pull_request.head.sha }}\n          path: .proposed\n      - run: cd website && npm ci\n"
+  );
+  assert.deepEqual(elsewhere, []);
 });
 
 test("passing an isolated checkout to a trusted program is still allowed", () => {
