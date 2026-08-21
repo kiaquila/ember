@@ -141,7 +141,7 @@ they were.
 ## Baseline pin — provisional
 
 `.web-design/lock.json` pins
-`f042879d8b6d11cc80021bb19cc4aacd645cc621` from the
+`8ad23395c5d31e8a87bd82ca25ba91f2053e5c3b` from the
 `codex/web-design-template-v2` branch of `kiaquila/web-design`, at version
 `0.1.0-dev`.
 
@@ -149,7 +149,7 @@ they were.
 published an immutable stable release, because the pull request that turns it
 into a template — [`kiaquila/web-design#46`](https://github.com/kiaquila/web-design/pull/46)
 — is still a draft and must not be merged until every project has been migrated
-and verified. `f042879d` is the exact, reachable commit that pull request
+and verified. `8ad23395` is the exact, reachable commit that pull request
 proposes, so it is a real 40-character SHA that `baseline-source-verification`
 can download and compare, and the standard `npm run setup` adoption path
 accepted it without any workaround.

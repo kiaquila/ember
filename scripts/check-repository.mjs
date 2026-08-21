@@ -84,30 +84,147 @@ const PERSONAL_PATH_PATTERNS = [
 
 const KNOWN_NO_OP_COMMAND = /^(?:(?:true|:|exit\s+0|echo(?:\s+.*)?|printf(?:\s+.*)?)(?:\s*(?:&&|;)\s*)?)+$/;
 
-// A shell only starts a comment at an unquoted `#` that begins a word, so the
-// no-op test must run against the code the shell would actually execute.
+// A shell only starts a comment at an unquoted `#` that begins a word, and the
+// comment ends at the newline rather than at the end of the script, so later
+// lines must survive.
 function stripShellComments(command) {
+  let stripped = "";
   let quote = null;
-  for (let index = 0; index < command.length; index += 1) {
+  let index = 0;
+  while (index < command.length) {
     const character = command[index];
+    if (quote) {
+      if (character === "\\" && quote === '"') {
+        stripped += character + (command[index + 1] ?? "");
+        index += 2;
+        continue;
+      }
+      if (character === quote) quote = null;
+      stripped += character;
+      index += 1;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      stripped += character;
+      index += 1;
+      continue;
+    }
+    if (character === "\\") {
+      stripped += character + (command[index + 1] ?? "");
+      index += 2;
+      continue;
+    }
+    if (character === "#" && (index === 0 || /[\s;&|(]/.test(command[index - 1]))) {
+      const newline = command.indexOf("\n", index);
+      if (newline === -1) break;
+      stripped += "\n";
+      index = newline + 1;
+      continue;
+    }
+    stripped += character;
+    index += 1;
+  }
+  return stripped;
+}
+
+// `A || B` succeeds as soon as one branch succeeds, so a single always-true
+// branch anywhere in the chain makes the whole line pass without the product
+// check ever deciding the outcome.
+function shortCircuitBranches(line) {
+  const branches = [];
+  let current = "";
+  let quote = null;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    if (quote) {
+      if (character === "\\" && quote === '"') {
+        current += character + (line[index + 1] ?? "");
+        index += 1;
+        continue;
+      }
+      if (character === quote) quote = null;
+      current += character;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      current += character;
+      continue;
+    }
+    if (character === "|" && line[index + 1] === "|") {
+      branches.push(current);
+      current = "";
+      index += 1;
+      continue;
+    }
+    current += character;
+  }
+  branches.push(current);
+  return branches.map((branch) => branch.trim()).filter(Boolean);
+}
+
+// A pipeline reports its last stage's status, so `npm test | true` and
+// `true | true` both succeed no matter what the earlier stages did.
+function finalPipelineStage(branch) {
+  let stage = "";
+  let quote = null;
+  for (let index = 0; index < branch.length; index += 1) {
+    const character = branch[index];
+    if (quote) {
+      if (character === "\\" && quote === '"') {
+        stage += character + (branch[index + 1] ?? "");
+        index += 1;
+        continue;
+      }
+      if (character === quote) quote = null;
+      stage += character;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      stage += character;
+      continue;
+    }
+    if (character === "|") {
+      stage = "";
+      continue;
+    }
+    stage += character;
+  }
+  return stage.trim();
+}
+
+function hasTopLevelPipeline(branch) {
+  let quote = null;
+  for (let index = 0; index < branch.length; index += 1) {
+    const character = branch[index];
     if (quote) {
       if (character === "\\" && quote === '"') index += 1;
       else if (character === quote) quote = null;
       continue;
     }
-    if (character === "'" || character === '"') {
-      quote = character;
-      continue;
-    }
-    if (character === "\\") {
-      index += 1;
-      continue;
-    }
-    if (character !== "#") continue;
-    const previous = index === 0 ? "" : command[index - 1];
-    if (index === 0 || /[\s;&|(]/.test(previous)) return command.slice(0, index);
+    if (character === "'" || character === '"') quote = character;
+    else if (character === "|") return true;
   }
-  return command;
+  return false;
+}
+
+// `run-project-checks.mjs` runs the command through a shell without `pipefail`,
+// so a pipeline reports only its last stage: `npm test | tee build.log` is green
+// whatever the tests did. There is deliberately no opt-out. Searching the text
+// for `set -o pipefail` would accept `echo set -o pipefail; npm test | tee log`,
+// where the shell only prints it — the same trap as validating a script by
+// grepping it. A check that needs a pipeline belongs in a script file the
+// project already runs, where the shell options are real.
+function discardsPipelineFailure(line) {
+  return shortCircuitBranches(line).some((branch) => hasTopLevelPipeline(branch));
+}
+
+function isNoOpCommandLine(line) {
+  const branches = shortCircuitBranches(line);
+  if (!branches.length) return true;
+  return branches.some((branch) => KNOWN_NO_OP_COMMAND.test(finalPipelineStage(branch)));
 }
 
 function parseRoot(argv = process.argv.slice(2)) {
@@ -174,9 +291,16 @@ export function validateProjectConfig(config, profiles = []) {
         failures.push(`commands.check[${index}].run must be a non-empty string`);
         continue;
       }
-      const normalized = stripShellComments(check.run).trim().replace(/\s+/g, " ");
-      if (!normalized || KNOWN_NO_OP_COMMAND.test(normalized)) {
+      const lines = stripShellComments(check.run)
+        .split("\n")
+        .map((line) => line.trim().replace(/\s+/g, " "))
+        .filter(Boolean);
+      if (!lines.length || lines.every((line) => isNoOpCommandLine(line))) {
         failures.push(`commands.check[${index}].run must execute a real product check`);
+      } else if (lines.some((line) => discardsPipelineFailure(line))) {
+        failures.push(
+          `commands.check[${index}].run must not pipe; a pipeline hides an earlier stage's failure`
+        );
       }
     }
   }
@@ -320,12 +444,72 @@ function permissionWrites(node, scope, failures, path) {
 const REF_SELECTABLE_EVENTS = new Set([
   "create",
   "delete",
+  "merge_group",
   "pull_request",
   "pull_request_target",
   "push",
   "release",
+  "workflow_call",
   "workflow_dispatch"
 ]);
+
+// A push filtered to the default branch runs the default branch's own copy of
+// the workflow, which is the reviewed, trusted context the security standard
+// allows write jobs to run from. Every managed workflow already writes the
+// default branch as `main`; a tag filter or a wider branch list is not trusted.
+const DEFAULT_BRANCH_REF_NAMES = new Set(["main"]);
+const PUSH_FILTER_KEYS_WITHOUT_REF_WIDENING = new Set(["paths", "paths-ignore"]);
+
+function pushRestrictedToDefaultBranch(node) {
+  if (!isMap(node)) return false;
+  const push = node.items.find((pair) => isScalar(pair.key) && pair.key.value === "push");
+  if (!push || !isMap(push.value)) return false;
+  let branches = null;
+  for (const pair of push.value.items) {
+    if (!isScalar(pair.key) || typeof pair.key.value !== "string") return false;
+    if (pair.key.value === "branches") {
+      branches = pair.value;
+      continue;
+    }
+    if (!PUSH_FILTER_KEYS_WITHOUT_REF_WIDENING.has(pair.key.value)) return false;
+  }
+  if (!isSeq(branches) || branches.items.length === 0) return false;
+  return branches.items.every(
+    (item) => isScalar(item) && DEFAULT_BRANCH_REF_NAMES.has(item.value)
+  );
+}
+
+// A trusted event still runs with whatever ref a checkout step asks for. If a
+// write-capable job checks proposed code out over the workspace, the next step
+// that builds or tests runs that code with the write token. Blocklisting known
+// untrusted expressions is not enough — `github.event.comment.body` is supplied
+// by whoever commented — so only refs that are provably the trusted branch are
+// allowed. Anything else must be isolated under its own `path`, and
+// `docs/standards/security.md` carries the rule that such a tree is never
+// executed.
+const TRUSTED_CHECKOUT_REFS = [
+  /^\$\{\{\s*github\.event\.repository\.default_branch\s*\}\}$/,
+  /^\$\{\{\s*github\.sha\s*\}\}$/,
+  /^\$\{\{\s*github\.ref\s*\}\}$/,
+  /^\$\{\{\s*github\.ref_name\s*\}\}$/,
+  /^main$/,
+  /^refs\/heads\/main$/
+];
+
+function stepChecksOutUntrustedRefIntoWorkspace(step) {
+  const uses = mapPair(step, "uses");
+  if (!isScalar(uses?.value) || typeof uses.value.value !== "string") return false;
+  if (!/^actions\/checkout@/.test(uses.value.value)) return false;
+  const withNode = mapPair(step, "with")?.value;
+  if (!isMap(withNode)) return false;
+  const ref = mapPair(withNode, "ref")?.value;
+  if (!ref) return false;
+  if (!isScalar(ref) || typeof ref.value !== "string") return true;
+  const requested = ref.value.trim();
+  if (TRUSTED_CHECKOUT_REFS.some((pattern) => pattern.test(requested))) return false;
+  const path = mapPair(withNode, "path")?.value;
+  return !(isScalar(path) && typeof path.value === "string" && path.value.trim());
+}
 
 function dispatchOnlyJob(job) {
   const conditionNode = mapPair(job, "if")?.value;
@@ -419,12 +603,17 @@ export function validateWorkflowText(path, text) {
     if (events.has("pull_request_target")) {
       failures.push(`High-risk pull_request_target trigger in ${path}`);
     }
-    const refSelectable = [...events].some((event) => REF_SELECTABLE_EVENTS.has(event));
+    const trustedPush = pushRestrictedToDefaultBranch(onPair?.value);
+    const refSelectable = [...events].some((event) =>
+      event === "push" ? !trustedPush : REF_SELECTABLE_EVENTS.has(event)
+    );
+    let topLevelWrites = false;
     const topPermissions = mapPair(root, "permissions");
     if (!topPermissions) {
       failures.push(`Workflow must declare top-level permissions: ${path}`);
     } else {
       const writes = permissionWrites(topPermissions.value, "top-level permissions", failures, path);
+      topLevelWrites = writes;
       if (isScalar(topPermissions.value) && topPermissions.value.value === "write-all") {
         failures.push(`Workflow may not use write-all permissions: ${path}`);
       }
@@ -453,6 +642,10 @@ export function validateWorkflowText(path, text) {
         validateMappingKeys(jobPair.value, `job ${jobName} mapping`, failures, path);
         const reusableWorkflow = mapPair(jobPair.value, "uses");
         if (reusableWorkflow) validateActionReference(reusableWorkflow.value, failures, path);
+        const jobSecrets = mapPair(jobPair.value, "secrets");
+        if (jobSecrets && isScalar(jobSecrets.value) && jobSecrets.value.value === "inherit") {
+          failures.push(`Workflow job ${jobName} may not inherit caller secrets: ${path}`);
+        }
         const steps = mapPair(jobPair.value, "steps")?.value;
         if (steps !== undefined && !isSeq(steps)) {
           failures.push(`Workflow job ${jobName} steps must be a sequence: ${path}`);
@@ -471,8 +664,19 @@ export function validateWorkflowText(path, text) {
           }
         }
         const jobPermissions = mapPair(jobPair.value, "permissions");
+        const writes = jobPermissions
+          ? permissionWrites(jobPermissions.value, `job ${jobName} permissions`, failures, path)
+          : topLevelWrites;
+        if (writes && isSeq(steps)) {
+          for (const step of steps.items) {
+            if (isMap(step) && stepChecksOutUntrustedRefIntoWorkspace(step)) {
+              failures.push(
+                `Write-capable job ${jobName} checks an untrusted ref out over the workspace: ${path}`
+              );
+            }
+          }
+        }
         if (!jobPermissions) continue;
-        const writes = permissionWrites(jobPermissions.value, `job ${jobName} permissions`, failures, path);
         if (refSelectable && writes && !dispatchOnlyJob(jobPair.value)) {
           failures.push(
             `Ref-selectable job ${jobName} may not grant write permissions: ${path}`

@@ -30,9 +30,20 @@ After the first green workflow run:
    `baseline-source-verification` is published against the PR head by a trusted
    default-branch `workflow_run`; require that exact check name after its first
    successful run.
-7. Enable available dependency alerts, automated fixes, secret scanning, and
+7. Protect the privileged manual workflow with an environment, not only with
+   its `if` condition. A manual run selects a ref, and GitHub loads that ref's
+   copy of the workflow file, so a branch can delete the condition it disagrees
+   with before asking for the write token. The repository guard can only check
+   the workflows a pull request proposes; it cannot police a direct branch push.
+   Give `Web Design Update` a deployment environment whose branch rule allows
+   only the default branch, so GitHub — not the workflow file — decides whether
+   the job may run and whether its secrets are readable. Until that environment
+   exists, treat push access to this repository as equivalent to write access
+   through this workflow, and record that rather than claiming the condition
+   enforces it.
+8. Enable available dependency alerts, automated fixes, secret scanning, and
    push protection.
-8. Keep deployment secrets in environment-scoped stores and restrict production
+9. Keep deployment secrets in environment-scoped stores and restrict production
    environments to `main` plus any required human approval.
 
 Some private-repository plans do not expose branch protection or rulesets and

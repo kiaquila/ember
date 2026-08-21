@@ -78,10 +78,14 @@ jobs:
       issues: read
       pull-requests: read
     steps:
+      # This job holds `checks: write`, so the proposed head stays in its own
+      # directory rather than over the workspace. Every step below runs the
+      # trusted default-branch copy; nothing executes from here.
       - name: Checkout proposed repository state
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.head_sha }}
+          path: .codex-review-proposed
 
       - name: Checkout trusted Codex review gate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

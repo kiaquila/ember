@@ -368,6 +368,185 @@ test("rejects top-level write permissions on a manual-only workflow", () => {
   assert.match(failures.join("\n"), /may not grant top-level write permissions/);
 });
 
+test("rejects write permissions on merge-queue and reusable-workflow triggers", () => {
+  for (const trigger of ["merge_group", "workflow_call"]) {
+    const failures = validateWorkflowText(
+      ".github/workflows/example.yml",
+      `on: ${trigger}\npermissions:\n  contents: write\njobs:\n  publish:\n    runs-on: ubuntu-latest\n`
+    );
+    assert.match(failures.join("\n"), /may not grant top-level write permissions/, trigger);
+  }
+});
+
+test("a shell comment ends at its newline and later commands still count", () => {
+  const valid = structuredClone(config);
+  valid.commands.check = [{ name: "site", run: "echo preparing # explanation\nnpm test" }];
+  assert.deepEqual(validateProjectConfig(valid, ["no-deploy"]), []);
+});
+
+test("rejects a multi-line check whose every line is a no-op", () => {
+  const invalid = structuredClone(config);
+  invalid.commands.check = [{ name: "placeholder", run: "echo a # x\ntrue\n# done" }];
+  assert.deepEqual(
+    validateProjectConfig(invalid, ["no-deploy"]),
+    ["commands.check[0].run must execute a real product check"]
+  );
+});
+
+test("allows a write job on a push narrowed to the default branch", () => {
+  const failures = validateWorkflowText(
+    ".github/workflows/example.yml",
+    "on:\n  push:\n    branches:\n      - main\npermissions:\n  contents: read\njobs:\n  publish:\n    permissions:\n      contents: write\n    runs-on: ubuntu-latest\n"
+  );
+  assert.deepEqual(failures, []);
+});
+
+test("a push filter that widens beyond the default branch stays untrusted", () => {
+  const filters = [
+    "    branches:\n      - main\n      - dev",
+    "    branches:\n      - main\n    tags:\n      - \"v*\"",
+    "    branches-ignore:\n      - dev"
+  ];
+  for (const filter of filters) {
+    const failures = validateWorkflowText(
+      ".github/workflows/example.yml",
+      `on:\n  push:\n${filter}\npermissions:\n  contents: read\njobs:\n  publish:\n    permissions:\n      contents: write\n    runs-on: ubuntu-latest\n`
+    );
+    assert.match(failures.join("\n"), /job publish may not grant write permissions/, filter);
+  }
+});
+
+test("a default-branch push loses its trust when a ref-selectable trigger joins it", () => {
+  for (const extra of ["  pull_request:", "  workflow_dispatch:"]) {
+    const failures = validateWorkflowText(
+      ".github/workflows/example.yml",
+      `on:\n  push:\n    branches:\n      - main\n${extra}\npermissions:\n  contents: read\njobs:\n  publish:\n    permissions:\n      contents: write\n    runs-on: ubuntu-latest\n`
+    );
+    assert.match(failures.join("\n"), /job publish may not grant write permissions/, extra);
+  }
+});
+
+test("rejects product checks that short-circuit past the real command", () => {
+  for (const run of ["true || npm test", "npm test || true", "npm test || echo skipped"]) {
+    const invalid = structuredClone(config);
+    invalid.commands.check = [{ name: "placeholder", run }];
+    assert.deepEqual(
+      validateProjectConfig(invalid, ["no-deploy"]),
+      ["commands.check[0].run must execute a real product check"],
+      run
+    );
+  }
+});
+
+test("keeps checks whose control flow still decides the outcome", () => {
+  for (const run of ["npm test && true", "true && npm test", "true; npm test", 'npm test -- --grep "a||b"']) {
+    const valid = structuredClone(config);
+    valid.commands.check = [{ name: "site", run }];
+    assert.deepEqual(validateProjectConfig(valid, ["no-deploy"]), [], run);
+  }
+});
+
+test("rejects a reusable-workflow job that inherits caller secrets", () => {
+  const failures = validateWorkflowText(
+    ".github/workflows/example.yml",
+    "on: pull_request\npermissions:\n  contents: read\njobs:\n  call:\n    uses: kiaquila/web-design/.github/workflows/x.yml@3d3c42e5aac5ba805825da76410c181273ba90b1\n    secrets: inherit\n"
+  );
+  assert.match(failures.join("\n"), /may not inherit caller secrets/);
+});
+
+test("keeps explicitly named secrets on a reusable-workflow job", () => {
+  const failures = validateWorkflowText(
+    ".github/workflows/example.yml",
+    "on: pull_request\npermissions:\n  contents: read\njobs:\n  call:\n    uses: kiaquila/web-design/.github/workflows/x.yml@3d3c42e5aac5ba805825da76410c181273ba90b1\n    secrets:\n      TOKEN: ${{ secrets.SCOPED_TOKEN }}\n"
+  );
+  assert.deepEqual(failures, []);
+});
+
+test("rejects an untrusted checkout over the workspace in a write-capable job", () => {
+  for (const ref of [
+    "${{ github.event.pull_request.head.sha }}",
+    "refs/pull/${{ github.event.issue.number }}/head",
+    "${{ github.head_ref }}",
+    "${{ github.event.comment.body }}",
+    "${{ inputs.target_ref }}"
+  ]) {
+    const failures = validateWorkflowText(
+      ".github/workflows/example.yml",
+      `on: issue_comment\npermissions:\n  contents: write\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@PIN\n        with:\n          ref: ${ref}\n      - run: npm ci\n`.replace("PIN", "3d3c42e5aac5ba805825da76410c181273ba90b1")
+    );
+    assert.match(failures.join("\n"), /checks an untrusted ref out over the workspace/, ref);
+  }
+});
+
+test("accepts only checkout refs that are provably the trusted branch", () => {
+  for (const ref of [
+    "${{ github.event.repository.default_branch }}",
+    "${{ github.sha }}",
+    "${{ github.ref }}",
+    "main"
+  ]) {
+    const failures = validateWorkflowText(
+      ".github/workflows/example.yml",
+      `on: issue_comment\npermissions:\n  contents: write\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n        with:\n          ref: ${ref}\n`
+    );
+    assert.deepEqual(failures, [], ref);
+  }
+});
+
+test("keeps an untrusted checkout isolated under its own path", () => {
+  const failures = validateWorkflowText(
+    ".github/workflows/example.yml",
+    "on: issue_comment\npermissions:\n  contents: write\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n        with:\n          ref: ${{ github.event.pull_request.head.sha }}\n          path: .proposed\n      - run: node scripts/check.mjs --root .proposed\n"
+  );
+  assert.deepEqual(failures, []);
+});
+
+test("a read-only job may still check out proposed code", () => {
+  const failures = validateWorkflowText(
+    ".github/workflows/example.yml",
+    "on: pull_request\npermissions:\n  contents: read\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n        with:\n          ref: ${{ github.event.pull_request.head.sha }}\n"
+  );
+  assert.deepEqual(failures, []);
+});
+
+test("rejects a pipeline whose last stage cannot fail", () => {
+  for (const run of ["true | true", "npm test | true"]) {
+    const invalid = structuredClone(config);
+    invalid.commands.check = [{ name: "placeholder", run }];
+    assert.deepEqual(
+      validateProjectConfig(invalid, ["no-deploy"]),
+      ["commands.check[0].run must execute a real product check"],
+      run
+    );
+  }
+});
+
+test("rejects a pipeline that swallows an earlier stage's failure", () => {
+  const piped = [
+    "npm test | tee build.log",
+    "npm run build | tee build.log",
+    "set -o pipefail; npm test | tee build.log",
+    "echo set -o pipefail; npm test | tee build.log"
+  ];
+  for (const run of piped) {
+    const invalid = structuredClone(config);
+    invalid.commands.check = [{ name: "site", run }];
+    assert.deepEqual(
+      validateProjectConfig(invalid, ["no-deploy"]),
+      ["commands.check[0].run must not pipe; a pipeline hides an earlier stage's failure"],
+      run
+    );
+  }
+});
+
+test("a quoted pipe is not a pipeline", () => {
+  for (const run of ['npm test -- --grep "a|b"', "npm test -- --grep 'x|y'"]) {
+    const valid = structuredClone(config);
+    valid.commands.check = [{ name: "site", run }];
+    assert.deepEqual(validateProjectConfig(valid, ["no-deploy"]), [], run);
+  }
+});
+
 test("allows top-level write permissions on default-branch-only events", () => {
   for (const trigger of ["issue_comment", "workflow_run", "schedule"]) {
     const failures = validateWorkflowText(
