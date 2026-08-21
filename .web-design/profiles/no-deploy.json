@@ -1,0 +1,5 @@
+{
+  "id": "no-deploy",
+  "description": "Project with no automated deployment.",
+  "deploymentProvider": "none"
+}

@@ -1,0 +1,97 @@
+name: Web Design Update
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Immutable web-design release version
+        required: true
+        type: string
+      source_sha:
+        description: Full 40-character release commit SHA
+        required: true
+        type: string
+      accept_ownership_change:
+        description: Explicitly accept added or revoked managed paths
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    name: prepare-update-pr
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Validate immutable inputs
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.18.0"
+
+      - name: Apply allowlisted baseline bytes
+        env:
+          ACCEPT_OWNERSHIP_CHANGE: ${{ inputs.accept_ownership_change }}
+          GH_TOKEN: ${{ secrets.WEB_DESIGN_READ_TOKEN || github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(
+            apply
+            --repo kiaquila/web-design
+            --source-ref "$SOURCE_SHA"
+            --version "$VERSION"
+          )
+          if [ "$ACCEPT_OWNERSHIP_CHANGE" = "true" ]; then
+            args+=(--accept-ownership-change)
+          fi
+          node scripts/sync-project.mjs "${args[@]}"
+
+      - name: Open update pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet && [ -z "$(git status --short)" ]; then
+            echo "Baseline is already current."
+            exit 0
+          fi
+          branch="chore/web-design-${VERSION//./-}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add -A
+          git commit -m "chore: update web-design baseline to $VERSION" \
+            -m "Source: kiaquila/web-design@$SOURCE_SHA" \
+            -m "Co-authored-by: OpenAI Codex <codex@openai.com>"
+          git push --set-upstream origin "$branch"
+          body="$(printf '%s\n\n%s\n\n%s' \
+            "Updates managed governance files to web-design $VERSION." \
+            "Source commit: $SOURCE_SHA" \
+            "Co-authored-by: Codex <codex@openai.com>")"
+          gh pr create --base "${{ github.event.repository.default_branch }}" \
+            --head "$branch" \
+            --title "chore: update web-design baseline to $VERSION" \
+            --body "$body"

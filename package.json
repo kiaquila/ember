@@ -1,0 +1,17 @@
+{
+  "name": "web-design-project-template",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node scripts/check-repository.mjs && node scripts/check-managed-files.mjs",
+    "test": "node scripts/test-web-design.mjs",
+    "preflight": "npm run check && npm test",
+    "setup": "node scripts/bootstrap-project.mjs",
+    "project:check": "node scripts/run-project-checks.mjs",
+    "sync:web-design": "node scripts/sync-project.mjs",
+    "manifest:web-design": "node scripts/build-release-manifest.mjs"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}

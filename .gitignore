@@ -1,0 +1,25 @@
+.DS_Store
+node_modules/
+dist/
+.vinext/
+.wrangler/
+coverage/
+.next/
+
+# secrets and local credentials
+.env
+.env.*
+!.env.example
+*.key
+*.p12
+*.pfx
+*.pem
+*.session
+
+
+# tooling state
+.omc/
+.omx/
+.claude/
+worktrees/
+tsconfig.tsbuildinfo

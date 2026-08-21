@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "slug": "web-project",
+    "profile": "no-deploy",
+    "productPaths": []
+  },
+  "commands": {
+    "check": []
+  },
+  "deployment": {
+    "provider": "none",
+    "productionBranch": "main",
+    "rootDirectory": "."
+  },
+  "governance": {
+    "source": "kiaquila/web-design",
+    "channel": "v1",
+    "mode": "source"
+  },
+  "requiredChecks": [
+    "project-ci",
+    "repository-guard",
+    "baseline-source-verification",
+    "osv-scan",
+    "Codex Review"
+  ]
+}

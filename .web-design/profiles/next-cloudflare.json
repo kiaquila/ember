@@ -1,0 +1,9 @@
+{
+  "id": "next-cloudflare",
+  "description": "Next.js application deployed to Cloudflare with a project-owned adapter.",
+  "deploymentProvider": "cloudflare-workers",
+  "requirements": [
+    "Pin the framework adapter and Cloudflare compatibility date",
+    "Keep preview and production environments isolated"
+  ]
+}
