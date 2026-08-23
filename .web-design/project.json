@@ -11,7 +11,7 @@
     "check": [
       {
         "name": "project-check",
-        "run": "npm --prefix website run check"
+        "run": "npm run check --prefix website"
       }
     ]
   },

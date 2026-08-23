@@ -62,5 +62,5 @@ shared standards.
 - Audio must remain gesture-gated (autoplay policy) and fully silenced by
   mute; keep `prefers-reduced-motion` support working.
 - Before pushing: exercise hover, the full play cycle, stop, mute, and a
-  narrow viewport; run `npm run preflight` and `npm --prefix website run check`.
+  narrow viewport; run `npm run preflight` and `npm run check --prefix website`.
   Sound needs a real gesture — a scripted `click()` grants no user activation.

@@ -26,7 +26,12 @@ After the first green workflow run:
    required Code Owner review, conversation resolution, no force pushes, no
    branch deletion, stale approval dismissal, and the actual check names from
    `.web-design/project.json`. Do not register a required check before it has
-   run. Keep `.github/CODEOWNERS` aligned with the repository owner.
+   run. `.github/CODEOWNERS` is this repository's own file rather than a
+   managed one, precisely so it can name an owner who has rights here: replace
+   the owner it ships with, or required Code Owner review protects nothing. The
+   paths it lists are not yours to choose — the baseline tests check that every
+   managed path is still covered by some owner, and say which one is missing
+   when it is not.
    `baseline-source-verification` is published against the PR head by a trusted
    default-branch `workflow_run`; require that exact check name after its first
    successful run.
@@ -43,6 +48,10 @@ After the first green workflow run:
    to the repository. Until the branch rule is applied, treat push access to
    this repository as equivalent to write access through this workflow, and
    record that rather than claiming the condition enforces it.
+   The Codex Review dispatch job needs the same treatment: it declares
+   `environment: codex-review-dispatch` and holds `checks: write`, so restrict
+   that environment's deployment branches to the default branch too. A branch
+   copy of the workflow could otherwise mint a passing required check.
 8. Enable available dependency alerts, automated fixes, secret scanning, and
    push protection.
 9. Keep deployment secrets in environment-scoped stores and restrict production

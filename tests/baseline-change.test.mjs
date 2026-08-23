@@ -12,6 +12,116 @@ function write(root, path, value) {
   writeFileSync(join(root, path), value);
 }
 
+test("a handed-over file may stay, but not be rewritten on the way out", async () => {
+  // `sync-project.mjs` keeps a required file when it leaves the manifest; the
+  // trusted validator owes that file the other half of the rule, or the
+  // generated update PR could never pass its own required check.
+  const owners = ".github/CODEOWNERS";
+  const parent = mkdtempSync(join(tmpdir(), "web-design-baseline-handover-"));
+  const trusted = join(parent, "trusted");
+  const proposed = join(parent, "proposed");
+  const source = join(parent, "source");
+  try {
+    const before = [".web-design/managed-files.json", owners];
+    const after = [".web-design/managed-files.json"];
+    const project = JSON.stringify({ governance: { source: "kiaquila/web-design", mode: "consumer" } });
+    for (const root of [trusted, proposed, source]) write(root, ".web-design/project.json", project);
+    write(trusted, ".web-design/managed-files.json", `${JSON.stringify({ schemaVersion: 1, files: before })}\n`);
+    for (const root of [proposed, source]) {
+      write(root, ".web-design/managed-files.json", `${JSON.stringify({ schemaVersion: 1, files: after })}\n`);
+    }
+    // The project set its own owner, exactly as the setup guide asks.
+    write(trusted, owners, "/.github/ @project-owner\n");
+    write(proposed, owners, "/.github/ @project-owner\n");
+    const manifest = {
+      schemaVersion: 1,
+      version: "1.1.0",
+      files: after.map((path) => ({ path, sha256: hash(readFileSync(join(source, path))) }))
+    };
+    const manifestText = `${JSON.stringify(manifest)}\n`;
+    write(source, ".web-design/release-manifest.json", manifestText);
+    write(trusted, ".web-design/lock.json", JSON.stringify({
+      profile: "no-deploy",
+      files: { [owners]: hash("/.github/ @project-owner\n"), ".web-design/managed-files.json": hash(`${JSON.stringify({ schemaVersion: 1, files: before })}\n`) }
+    }));
+    write(proposed, ".web-design/lock.json", JSON.stringify({
+      schemaVersion: 1,
+      version: "1.1.0",
+      sourceCommit: "a".repeat(40),
+      profile: "no-deploy",
+      manifestSha256: hash(manifestText),
+      files: Object.fromEntries(manifest.files.map((file) => [file.path, file.sha256]))
+    }));
+
+    const kept = await checkBaselineChange({
+      proposedRoot: proposed,
+      trustedRoot: trusted,
+      changedPaths: [".web-design/managed-files.json", ".web-design/lock.json"],
+      sourceRoot: source
+    });
+    assert.equal(kept.join("\n").includes("was not removed"), false, kept.join("\n"));
+    assert.equal(kept.join("\n").includes("rewrite a handed-over file"), false, kept.join("\n"));
+
+    // The update may relinquish the file; it may not rewrite it.
+    write(proposed, owners, "/.github/ @someone-the-update-chose\n");
+    const rewritten = await checkBaselineChange({
+      proposedRoot: proposed,
+      trustedRoot: trusted,
+      changedPaths: [".web-design/managed-files.json", ".web-design/lock.json", owners],
+      sourceRoot: source
+    });
+    assert.match(rewritten.join("\n"), /rewrite a handed-over file|project-owned files/);
+
+    // And an update may not introduce the file where the trusted branch has
+    // none: that would let it choose the owner while dropping the path from
+    // the lock.
+    write(proposed, owners, "/.github/ @chosen-by-the-update\n");
+    rmSync(join(trusted, owners));
+    const introduced = await checkBaselineChange({
+      proposedRoot: proposed,
+      trustedRoot: trusted,
+      changedPaths: [".web-design/managed-files.json", ".web-design/lock.json", owners],
+      sourceRoot: source
+    });
+    assert.match(introduced.join("\n"), /missing from the trusted branch|project-owned files/);
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test("a base that is not a commit stops the comparison instead of passing it", async () => {
+  // `git diff ...HEAD` with an empty left side compares HEAD with itself, so
+  // every managed file reads as untouched and the comparison would pass
+  // without comparing anything. The workflow_run payload does not always
+  // carry a pull request, so this is a real shape rather than a hypothetical.
+  const parent = mkdtempSync(join(tmpdir(), "web-design-baseline-base-"));
+  const trusted = join(parent, "trusted");
+  const proposed = join(parent, "proposed");
+  try {
+    const ownership = `${JSON.stringify({ schemaVersion: 1, files: ["scripts/policy.mjs"] })}\n`;
+    const project = JSON.stringify({ governance: { source: "kiaquila/web-design", mode: "consumer" } });
+    for (const root of [trusted, proposed]) {
+      write(root, ".web-design/managed-files.json", ownership);
+      write(root, ".web-design/project.json", project);
+      write(root, "scripts/policy.mjs", "old\n");
+      write(root, ".web-design/lock.json", JSON.stringify({
+        profile: "no-deploy",
+        sourceCommit: "a".repeat(40),
+        files: { "scripts/policy.mjs": hash("old\n") }
+      }));
+    }
+    for (const baseSha of ["", "HEAD", "abc123", "a".repeat(39)]) {
+      await assert.rejects(
+        () => checkBaselineChange({ proposedRoot: proposed, trustedRoot: trusted, baseSha }),
+        /base SHA must be a full 40-character commit SHA/,
+        baseSha
+      );
+    }
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
 test("trusted validation accepts exact source bytes and rejects self-signed policy", async () => {
   const parent = mkdtempSync(join(tmpdir(), "web-design-baseline-check-"));
   const trusted = join(parent, "trusted");

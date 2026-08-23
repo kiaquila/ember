@@ -10,7 +10,7 @@ import {
   writeFileSync
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { syncProject, validateArchive } from "../scripts/sync-project.mjs";
@@ -303,6 +303,68 @@ test("removes a revoked managed file only when it is unchanged", async () => {
     assert.ok(result.changes.some((item) => item.path === "retired.txt" && item.action === "delete"));
     assert.equal(existsSync(join(target, "retired.txt")), false);
     assert.equal(JSON.parse(readFileSync(join(target, ".web-design/lock.json"))).files["retired.txt"], undefined);
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test("the updater runs on a bare runner", () => {
+  // `web-design-update.yml` invokes the updater on a fresh runner with nothing
+  // installed. Importing the guard for a shared constant pulled its YAML
+  // parser in at load time and the updater died with a missing module before
+  // it could read a release, so the constant lives in a module that imports
+  // nothing and this is what keeps it that way.
+  const updater = readFileSync(resolve("scripts/sync-project.mjs"), "utf8");
+  assert.equal(/^import .*check-repository\.mjs/m.test(updater), false);
+  const shared = readFileSync(resolve("scripts/repository-paths.mjs"), "utf8");
+  assert.equal(/^import\b/m.test(shared), false);
+  assert.match(shared, /export const REQUIRED_ROOT_FILES/);
+});
+
+test("a required file leaving the manifest is handed over, not taken away", async () => {
+  // `.github/CODEOWNERS` stopped being managed so a consumer could name an
+  // owner with rights in its own repository. Deleting it on upgrade would
+  // break the repository the file protects, and refusing the upgrade over the
+  // edit the setup guide asked for would strand the consumer who followed it.
+  const owners = ".github/CODEOWNERS";
+  for (const localEdit of [null, "/.github/ @someone-else\n"]) {
+    const initialPaths = [".web-design/managed-files.json", owners];
+    const { parent, source, target } = fixture(initialPaths);
+    try {
+      release(source, "1.0.0", { [owners]: "/.github/ @source-owner\n" }, initialPaths);
+      await applyLocal(target, source, "1.0.0");
+      if (localEdit) write(target, owners, localEdit);
+      release(source, "1.1.0", {}, [".web-design/managed-files.json"]);
+      const result = await applyLocal(target, source, "1.1.0", { acceptOwnershipChange: true });
+      assert.deepEqual(result.conflicts, [], String(localEdit));
+      assert.ok(result.changes.some((item) => item.path === owners && item.action === "release"));
+      assert.equal(existsSync(join(target, owners)), true);
+      assert.equal(
+        readFileSync(join(target, owners), "utf8"),
+        localEdit ?? "/.github/ @source-owner\n"
+      );
+      const lock = JSON.parse(readFileSync(join(target, ".web-design/lock.json")));
+      assert.equal(lock.files[owners], undefined);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  }
+});
+
+test("drift in a required file still stops an update that is not releasing it", async () => {
+  // The deferral above is a deferral, not an exemption: a workflow edited
+  // locally is still drift, and the update stops for it.
+  const workflow = ".github/workflows/ci.yml";
+  const initialPaths = [".web-design/managed-files.json", workflow];
+  const { parent, source, target } = fixture(initialPaths);
+  try {
+    release(source, "1.0.0", { [workflow]: "on: push\n" }, initialPaths);
+    await applyLocal(target, source, "1.0.0");
+    write(target, workflow, "on: pull_request\n");
+    release(source, "1.1.0", { [workflow]: "on: push\n" }, initialPaths);
+    const result = await applyLocal(target, source, "1.1.0");
+    assert.deepEqual(result.conflicts, [workflow]);
+    assert.equal(readFileSync(join(target, workflow), "utf8"), "on: pull_request\n");
   } finally {
     rmSync(parent, { recursive: true, force: true });
   }

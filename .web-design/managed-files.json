@@ -1,7 +1,6 @@
 {
   "schemaVersion": 1,
   "files": [
-    ".github/CODEOWNERS",
     ".github/pull_request_template.md",
     ".github/workflows/baseline-source-verification.yml",
     ".github/workflows/ci.yml",
@@ -39,9 +38,11 @@
     "scripts/codex-review-request.mjs",
     "scripts/codex-review-rerun.mjs",
     "scripts/publish-codex-review-check.mjs",
+    "scripts/repository-paths.mjs",
     "scripts/run-project-checks.mjs",
     "scripts/sync-project.mjs",
     "scripts/test-web-design.mjs",
+    "scripts/verify-baseline-source.mjs",
     "tests/baseline-change.test.mjs",
     "tests/bootstrap-project.test.mjs",
     "tests/codex-review-gate.test.mjs",

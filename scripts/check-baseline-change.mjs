@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { checkManagedFiles } from "./check-managed-files.mjs";
 import { downloadSource, ownershipPaths, sha256, validateRelease } from "./sync-project.mjs";
+import { REQUIRED_ROOT_FILES } from "./repository-paths.mjs";
 
 function readJson(root, path) {
   return JSON.parse(readFileSync(resolve(root, path), "utf8"));
@@ -16,6 +17,13 @@ function ownership(root) {
 }
 
 function diffPaths(root, baseSha) {
+  // An empty base makes `git diff ...HEAD` compare HEAD with itself: no paths
+  // changed, so every managed file reads as untouched and the comparison
+  // passes without comparing anything. A base that is not a commit is a
+  // payload this run cannot verify against.
+  if (!/^[a-f0-9]{40}$/i.test(String(baseSha ?? ""))) {
+    throw new Error("Pull-request base SHA must be a full 40-character commit SHA");
+  }
   const result = spawnSync("git", ["diff", "--name-only", `${baseSha}...HEAD`], {
     cwd: root,
     encoding: "utf8"
@@ -103,6 +111,37 @@ export async function checkBaselineChange({
       if (sha256(bytes) !== file.sha256) failures.push(`Proposed baseline differs from source: ${file.path}`);
     }
     for (const path of release.removals) {
+      // A file the repository is required to have is handed to the project
+      // rather than deleted, so the updater leaves it in place — see the
+      // matching rule in `sync-project.mjs`. What this validator owes such a
+      // file is the other half: the update may relinquish it, but may not
+      // rewrite it on the way out, so its bytes must be the ones the trusted
+      // branch already had, whatever the project made of them.
+      if (REQUIRED_ROOT_FILES.includes(path)) {
+        let proposedBytes;
+        let trustedBytes;
+        try {
+          proposedBytes = readFileSync(resolve(proposed, path));
+        } catch {
+          failures.push(`Handed-over file was removed instead of kept: ${path}`);
+          continue;
+        }
+        try {
+          trustedBytes = readFileSync(resolve(trusted, path));
+        } catch {
+          // Nothing to hand over: the trusted branch does not have this file,
+          // so accepting whatever the proposal supplies would let an update
+          // introduce one — a CODEOWNERS naming an owner of its choosing —
+          // while dropping it from the lock. Restoring it is a project-owned
+          // change, made deliberately and reviewed as itself.
+          failures.push(`Handed-over file is missing from the trusted branch: ${path}`);
+          continue;
+        }
+        if (sha256(proposedBytes) !== sha256(trustedBytes)) {
+          failures.push(`Baseline update may not rewrite a handed-over file: ${path}`);
+        }
+        continue;
+      }
       try {
         readFileSync(resolve(proposed, path));
         failures.push(`Revoked managed file was not removed: ${path}`);

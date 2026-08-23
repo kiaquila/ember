@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { REQUIRED_ROOT_FILES } from "./repository-paths.mjs";
 
 export function sha256(buffer) {
   return createHash("sha256").update(buffer).digest("hex");
@@ -261,7 +262,16 @@ export async function syncProject({
   if (command === "status") {
     return { conflicts: installed.conflicts, changes: [] };
   }
-  if (installed.conflicts.length) return { conflicts: installed.conflicts, changes: [] };
+  // Drift in a managed file stops the update, and that judgement is only
+  // deferred — never dropped — for a file the repository is required to have:
+  // this release may be handing it over, and an edit made on the setup guide's
+  // instruction should not strand the consumer who made it. Which paths are
+  // being handed over is only known once the release is read, below.
+  const deferredConflicts = installed.conflicts.filter((path) => REQUIRED_ROOT_FILES.includes(path));
+  const immediateConflicts = installed.conflicts.filter(
+    (path) => !REQUIRED_ROOT_FILES.includes(path)
+  );
+  if (immediateConflicts.length) return { conflicts: immediateConflicts, changes: [] };
   const installedOwnership = installed.ownership;
   let downloaded;
   try {
@@ -271,6 +281,8 @@ export async function syncProject({
       source = downloaded.root;
     }
     const release = validateRelease(source, version, installedOwnership, acceptOwnershipChange);
+    const stillDrifted = deferredConflicts.filter((path) => !release.removals.includes(path));
+    if (stillDrifted.length) return { conflicts: stillDrifted, changes: [] };
     const conflicts = [];
     const changes = [];
     for (const file of release.files) {
@@ -294,7 +306,14 @@ export async function syncProject({
       const destination = assertNoSymlinkComponents(target, path);
       const previousHash = lock.files?.[path] ?? null;
       const currentHash = existsSync(destination) ? sha256(readFileSync(destination)) : null;
-      if (previousHash && currentHash === previousHash) changes.push({ path, action: "delete" });
+      // A file the repository is required to have is handed over rather than
+      // taken away: it leaves the lock and keeps whatever bytes it has, local
+      // edits included. Deleting it would break the repository it was meant to
+      // protect, and refusing the update over an edit would strand a consumer
+      // who had edited it on instruction — which is how `.github/CODEOWNERS`
+      // came to be released to projects in the first place.
+      if (REQUIRED_ROOT_FILES.includes(path)) changes.push({ path, action: "release" });
+      else if (previousHash && currentHash === previousHash) changes.push({ path, action: "delete" });
       else if (currentHash === null) changes.push({ path, action: "same" });
       else conflicts.push(path);
     }
