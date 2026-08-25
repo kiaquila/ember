@@ -269,21 +269,47 @@ const ACTOR_CONTROLLED_REF = [
   /github\.event\.(?:issue|comment|pull_request|client_payload|workflow_run)\b/
 ];
 
-/** Every actor-controlled ref the workflow's steps check out or execute. */
-function actorControlledRefs(workflow) {
-  const found = [];
+/** Every string that can decide what a job checks out or executes.
+
+    Not every string in the workflow: an `if:` condition routes the job
+    without fetching anything, and the review-rerun workflow legitimately
+    tests `github.event.comment` there. Env values are included because a ref
+    parked in one reaches a checkout through `${{ env.… }}`. */
+function executionInfluencingValues(workflow) {
+  const values = [];
+  const collect = (map) => {
+    if (map && typeof map === "object") {
+      values.push(...Object.values(map).filter((value) => typeof value === "string"));
+    }
+  };
+
+  collect(workflow.env);
   for (const job of Object.values(workflow.jobs ?? {})) {
     if (!job || typeof job !== "object") continue;
+    collect(job.env);
+    if (typeof job.defaults?.run?.["working-directory"] === "string") {
+      values.push(job.defaults.run["working-directory"]);
+    }
     for (const step of Array.isArray(job.steps) ? job.steps : []) {
       if (!step || typeof step !== "object") continue;
-      /* The ref a checkout takes, and any shell that could fetch one. */
-      for (const value of [step.with?.ref, step.with?.repository, step.run]) {
-        if (typeof value !== "string") continue;
-        for (const pattern of ACTOR_CONTROLLED_REF) {
-          const match = value.match(pattern);
-          if (match) found.push(match[0]);
-        }
+      collect(step.env);
+      /* Every input, not just `ref`: an action can take a ref under any name. */
+      collect(step.with);
+      for (const key of ["run", "working-directory"]) {
+        if (typeof step[key] === "string") values.push(step[key]);
       }
+    }
+  }
+  return values;
+}
+
+/** Every actor-controlled ref the workflow could check out or execute. */
+function actorControlledRefs(workflow) {
+  const found = [];
+  for (const value of executionInfluencingValues(workflow)) {
+    for (const pattern of ACTOR_CONTROLLED_REF) {
+      const match = value.match(pattern);
+      if (match) found.push(match[0]);
     }
   }
   return [...new Set(found)];

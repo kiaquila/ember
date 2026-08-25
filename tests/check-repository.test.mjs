@@ -246,6 +246,58 @@ test("a write-capable workflow may not name an actor-controlled ref", () => {
   const readOnly = viaCli.replace("  contents: write", "  contents: read");
   assert.deepEqual(checkWorkflow("read.yml", readOnly), []);
 
+  /* Parking the ref in an env value and expanding it later is the same
+     checkout, so env values count as well — at any level. */
+  const viaEnv = [
+    "on:",
+    "  issue_comment:",
+    "    types: [created]",
+    "permissions:",
+    "  contents: write",
+    "env:",
+    "  PR_REF: refs/pull/${{ github.event.issue.number }}/head",
+    "jobs:",
+    "  a:",
+    "    steps:",
+    `      - uses: ${pinned}`,
+    "        with:",
+    "          ref: ${{ env.PR_REF }}"
+  ].join("\n");
+  assert.match(checkWorkflow("env.yml", viaEnv).join("\n"), /names an actor-controlled ref/);
+
+  /* An action can take a ref under any input name, so every `with` value is
+     read rather than `ref` and `repository` alone. */
+  const otherInput = [
+    "on:",
+    "  issue_comment:",
+    "    types: [created]",
+    "permissions:",
+    "  contents: write",
+    "jobs:",
+    "  a:",
+    "    steps:",
+    `      - uses: ${pinned}`,
+    "        with:",
+    "          revision: ${{ github.head_ref }}"
+  ].join("\n");
+  assert.match(checkWorkflow("input.yml", otherInput).join("\n"), /names an actor-controlled ref/);
+
+  /* An `if:` condition routes the job without fetching anything, which is
+     how the review-rerun workflow legitimately tests `github.event.comment`. */
+  const routing = [
+    "on:",
+    "  issue_comment:",
+    "    types: [created]",
+    "permissions:",
+    "  actions: write",
+    "jobs:",
+    "  a:",
+    "    if: github.event.comment.user.login == 'chatgpt-codex-connector[bot]'",
+    "    steps:",
+    "      - run: node scripts/codex-review-rerun.mjs"
+  ].join("\n");
+  assert.deepEqual(checkWorkflow("routing.yml", routing), []);
+
   /* `github.event.repository.*` is chosen by the repository, not an actor —
      it is how the review-rerun workflow pins its trusted checkout. */
   const trusted = [
