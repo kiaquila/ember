@@ -99,6 +99,14 @@ export function checkRepository(root, files = trackedFiles(root)) {
     failures.push(...checkWorkflow(workflow, readFileSync(path, "utf8")));
   }
 
+  /* Every local action manifest, wherever it lives: a workflow may reference
+     one by path, and its steps can reach a mutable third-party action. */
+  for (const manifest of files.filter((file) => /(?:^|\/)action\.ya?ml$/.test(file))) {
+    const path = join(root, manifest);
+    if (!existsSync(path)) continue;
+    failures.push(...checkActionManifest(manifest, readFileSync(path, "utf8")));
+  }
+
   return [...new Set(failures)];
 }
 
@@ -109,7 +117,13 @@ export function checkRepository(root, files = trackedFiles(root)) {
    `workflow_dispatch` run the copy on the ref being proposed or selected, and
    `push` runs the copy in the commit that was pushed; in those, a write grant
    is a write token a branch can point at its own code. */
-const BRANCH_CONTROLLED_TRIGGERS = new Set(["pull_request", "workflow_dispatch"]);
+const BRANCH_CONTROLLED_TRIGGERS = new Set([
+  "pull_request",
+  /* A merge-queue run builds a temporary commit that already contains the
+     pull request's own workflow changes. */
+  "merge_group",
+  "workflow_dispatch"
+]);
 
 /* This repository's trusted branch. A `push:` filtered down to it can only
    ever run that branch's own copy of the workflow. */
@@ -125,15 +139,26 @@ function triggerNames(on) {
   return on && typeof on === "object" ? Object.keys(on) : [];
 }
 
+/** True when a `tags-ignore` filter leaves no tag able to fire the workflow.
+    `**` is the only pattern that matches every tag name, slashes included. */
+function excludesEveryTag(tagsIgnore) {
+  const ignored = Array.isArray(tagsIgnore)
+    ? tagsIgnore
+    : typeof tagsIgnore === "string" ? [tagsIgnore] : [];
+  return ignored.includes("**");
+}
+
 /** True when `push:` can only ever fire for the trusted branch. */
 function pushRestrictedToDefaultBranch(on) {
   const push = on && typeof on === "object" && !Array.isArray(on) ? on.push : null;
   /* `on: push` and `push:` with no filter run for every branch. */
   if (!push || typeof push !== "object") return false;
-  /* A `branches` filter alone means tag pushes do not fire the workflow —
-     but naming any tag filter turns them back on, and a tag push runs the
-     tagged commit's copy, which is a branch-controlled ref again. */
-  if ("tags" in push || "tags-ignore" in push) return false;
+  /* A `branches` filter alone means tag pushes do not fire the workflow. A
+     `tags` filter turns them back on, and a tag push runs the tagged commit's
+     copy — branch-controlled again. `tags-ignore` only re-admits the tags it
+     does not name, so it is safe when it excludes every one of them. */
+  if ("tags" in push) return false;
+  if ("tags-ignore" in push && !excludesEveryTag(push["tags-ignore"])) return false;
   /* `branches-ignore` is an exclusion, so it never proves a restriction. */
   const branches = push.branches;
   const listed = Array.isArray(branches) ? branches : typeof branches === "string" ? [branches] : [];
@@ -218,10 +243,19 @@ export function checkWorkflow(name, text) {
     );
   }
 
-  /* A tag or branch reference is mutable, so a compromised action would run
-     here on the next push without any change landing in this repository. A
-     local action is this repository's own code and is already reviewed. */
-  for (const action of actionReferences(workflow)) {
+  failures.push(...unpinnedActions(name, actionReferences(workflow)));
+
+  return failures;
+}
+
+/* A tag or branch reference is mutable, so a compromised action would run here
+   on the next push without any change landing in this repository. A local
+   `./` action is this repository's own reviewed code — but its manifest can
+   itself call out to a mutable action, which is why checkActionManifest below
+   holds those to the same rule. */
+function unpinnedActions(name, references) {
+  const failures = [];
+  for (const action of references) {
     if (action.startsWith("./")) continue;
     /* A container action is immutable only at a digest; `:latest` is not. */
     if (action.startsWith("docker://")) {
@@ -235,8 +269,25 @@ export function checkWorkflow(name, text) {
       failures.push(`Action is not pinned to a full SHA in ${name}: ${action}`);
     }
   }
-
   return failures;
+}
+
+/** A composite action's own steps have to be pinned like a workflow's. */
+export function checkActionManifest(name, text) {
+  let manifest;
+  try {
+    manifest = parse(text);
+  } catch (error) {
+    return [`Action manifest is not valid YAML: ${name} (${error.message})`];
+  }
+  if (!manifest || typeof manifest !== "object") {
+    return [`Action manifest is not a YAML mapping: ${name}`];
+  }
+  const steps = Array.isArray(manifest.runs?.steps) ? manifest.runs.steps : [];
+  const references = steps
+    .filter((step) => step && typeof step.uses === "string")
+    .map((step) => step.uses);
+  return unpinnedActions(name, references);
 }
 
 /* The tests import the functions above; only a direct run checks the tree. */

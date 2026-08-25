@@ -7,7 +7,7 @@ import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { checkRepository, checkWorkflow } from "../scripts/check-repository.mjs";
+import { checkActionManifest, checkRepository, checkWorkflow } from "../scripts/check-repository.mjs";
 
 function scratchRepository(files) {
   const root = mkdtempSync(join(tmpdir(), "ember-guard-"));
@@ -195,8 +195,43 @@ test("push counts as branch-controlled unless it is pinned to the trusted branch
      commit's copy, which anyone able to push a tag controls. */
   const tagged = ["on:", "  push:", "    branches: [main]", "    tags: ['*']", write].join("\n");
   assert.match(checkWorkflow("tagged.yml", tagged).join("\n"), /branch-controlled trigger \(push\)/);
+  /* `tags-ignore` re-admits every tag it does not name... */
   const tagIgnore = ["on:", "  push:", "    branches: [main]", "    tags-ignore: [v0]", write].join("\n");
   assert.match(checkWorkflow("tag-ignore.yml", tagIgnore).join("\n"), /branch-controlled trigger \(push\)/);
+  /* ...but `**` names all of them, which leaves no tag able to fire it. */
+  const tagIgnoreAll = ["on:", "  push:", "    branches: [main]", '    tags-ignore: ["**"]', write].join("\n");
+  assert.deepEqual(checkWorkflow("tag-ignore-all.yml", tagIgnoreAll), []);
+});
+
+test("a merge-queue run is branch-controlled too", () => {
+  /* The merge-group commit already contains the pull request's own workflow
+     changes, so it is the proposed code by another name. */
+  const mergeGroup = ["on:", "  merge_group:", "permissions:", "  actions: write"].join("\n");
+  assert.match(
+    checkWorkflow("queue.yml", mergeGroup).join("\n"),
+    /grants write permission on a branch-controlled trigger \(merge_group\)/
+  );
+});
+
+test("a local action's own steps are pinned like a workflow's", () => {
+  /* `uses: ./...` is skipped in a workflow because it is this repository's
+     reviewed code — but that manifest can call out to a mutable action, so
+     it is held to the same rule. */
+  const composite = ["runs:", "  using: composite", "  steps:", "    - uses: owner/action@main"].join("\n");
+  assert.match(
+    checkActionManifest(".github/actions/x/action.yml", composite).join("\n"),
+    /not pinned to a full SHA .*owner\/action@main/
+  );
+
+  const pinned = ["runs:", "  using: composite", "  steps:", `    - uses: owner/action@${"a".repeat(40)}`].join("\n");
+  assert.deepEqual(checkActionManifest(".github/actions/x/action.yml", pinned), []);
+
+  /* A manifest with no steps at all is fine; an unreadable one is not. */
+  assert.deepEqual(checkActionManifest("action.yml", "runs:\n  using: node20\n  main: index.js\n"), []);
+  assert.match(
+    checkActionManifest("action.yml", "runs:\n  using: composite\n :::bad[\n").join("\n"),
+    /Action manifest is not valid YAML/
+  );
 });
 
 test("container actions must name an immutable digest", () => {
