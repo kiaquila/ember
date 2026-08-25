@@ -14,6 +14,7 @@ import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { syncProject, validateArchive } from "../scripts/sync-project.mjs";
+import { REQUIRED_ROOT_FILES } from "../scripts/repository-paths.mjs";
 
 function hash(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -348,6 +349,51 @@ test("a required file leaving the manifest is handed over, not taken away", asyn
     } finally {
       rmSync(parent, { recursive: true, force: true });
     }
+  }
+});
+
+test("a required root file is not revoked in the release that adds the handover", () => {
+  // The handover above is performed by *this* updater, and a consumer reaches
+  // it only after this release is installed: `web-design-update.yml` checks the
+  // consumer out and runs the `scripts/sync-project.mjs` already in its tree,
+  // which is the previous one. Revoking a required root file here therefore
+  // hands the upgrade to that previous updater, which deletes the file when it
+  // is pristine — leaving a repository without a path `REQUIRED_ROOT_FILES`
+  // says it must have, so this release's own guard then fails — and refuses the
+  // update outright when the file carries a local edit, which is exactly what
+  // the old setup guide asked consumers to make to `.github/CODEOWNERS`.
+  //
+  // So the revocation waits one release. This release ships the handover and
+  // keeps the file managed; the release after it revokes ownership, by which
+  // time every consumer runs the code above and keeps its own bytes.
+  const ownership = JSON.parse(
+    readFileSync(new URL("../.web-design/managed-files.json", import.meta.url), "utf8")
+  );
+  const managed = ownership.files.map((entry) => (typeof entry === "string" ? entry : entry.path));
+  for (const path of REQUIRED_ROOT_FILES) {
+    if (path !== ".github/CODEOWNERS") continue;
+    assert.ok(
+      managed.includes(path),
+      `${path} is required and must stay managed until the handover release`
+    );
+  }
+});
+
+test("rejects revocation of the ownership manifest", async () => {
+  const { parent, source, target } = fixture();
+  try {
+    write(source, ".web-design/managed-files.json", ownershipText([]));
+    write(
+      source,
+      ".web-design/release-manifest.json",
+      `${JSON.stringify({ schemaVersion: 1, version: "1.0.0", files: [] })}\n`
+    );
+    await assert.rejects(
+      applyLocal(target, source, "1.0.0", { acceptOwnershipChange: true }),
+      /managed-files ownership manifest cannot be revoked/
+    );
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
   }
 });
 

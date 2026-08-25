@@ -26,12 +26,17 @@ After the first green workflow run:
    required Code Owner review, conversation resolution, no force pushes, no
    branch deletion, stale approval dismissal, and the actual check names from
    `.web-design/project.json`. Do not register a required check before it has
-   run. `.github/CODEOWNERS` is this repository's own file rather than a
-   managed one, precisely so it can name an owner who has rights here: replace
-   the owner it ships with, or required Code Owner review protects nothing. The
-   paths it lists are not yours to choose — the baseline tests check that every
-   managed path is still covered by some owner, and say which one is missing
-   when it is not.
+   run. `.github/CODEOWNERS` is still a managed file in this release, and is
+   being handed over to projects in the next one: the updater that performs the
+   handover ships here, but a consumer only runs it *after* this release is
+   installed, so revoking the file here would have the previous updater delete
+   it on the way in. Until the handover lands, do not edit it — an edit is
+   managed-file drift, and the previous updater refuses an update while it
+   stands. Enable the rest of the ruleset now and leave required Code Owner
+   review until the file names an owner with rights in this repository; the
+   paths it lists are not yours to choose in either release, because the
+   baseline tests check that every managed path is covered by some owner and
+   name the missing one when it is not.
    `baseline-source-verification` is published against the PR head by a trusted
    default-branch `workflow_run`; require that exact check name after its first
    successful run.
@@ -52,6 +57,12 @@ After the first green workflow run:
    `environment: codex-review-dispatch` and holds `checks: write`, so restrict
    that environment's deployment branches to the default branch too. A branch
    copy of the workflow could otherwise mint a passing required check.
+   These two names are the only ones the repository guard accepts on a
+   write-capable manual job, matched exactly, because an environment nobody has
+   restricted is created on first use with no rules on it — a renamed one would
+   read as gated here and be protected by nothing. Restricting both is the
+   whole of the control; a privileged manual workflow under a third name is a
+   change to the guard and to this list together.
 8. Enable available dependency alerts, automated fixes, secret scanning, and
    push protection.
 9. Keep deployment secrets in environment-scoped stores and restrict production

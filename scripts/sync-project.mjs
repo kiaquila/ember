@@ -112,6 +112,14 @@ export function validateRelease(sourceRoot, expectedVersion, installedOwnership,
   }
   const additions = [...upstreamOwnership].filter((path) => !installedOwnership.has(path));
   const removals = [...installedOwnership].filter((path) => !upstreamOwnership.has(path));
+  // This file defines the ownership set that every later status/update reads.
+  // Handing it over while removing it from the lock leaves its retained bytes
+  // self-identifying as managed and makes the repository permanently fail the
+  // ownership/lock equality check. It is foundational, not a generic required
+  // file that can be released to the project.
+  if (removals.includes(".web-design/managed-files.json")) {
+    throw new Error("The managed-files ownership manifest cannot be revoked");
+  }
   if ((additions.length || removals.length) && !acceptOwnershipChange) {
     const details = [
       additions.length ? `added: ${additions.join(", ")}` : null,

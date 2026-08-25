@@ -4,7 +4,13 @@ import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { basename, isAbsolute, join, normalize, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
-import { REQUIRED_ROOT_FILES } from "./repository-paths.mjs";
+import {
+  canonicalRepositorySegment,
+  FORBIDDEN_REPOSITORY_SEGMENTS,
+  isRestrictedRepositorySegment,
+  normalizeProjectOwnedDirectory,
+  REQUIRED_ROOT_FILES
+} from "./repository-paths.mjs";
 import { fileURLToPath } from "node:url";
 
 const requirePolicyDependency = createRequire(
@@ -19,15 +25,13 @@ if (!yamlEntry.startsWith(`${policyNodeModules}${sep}`)) {
 }
 const { isAlias, isMap, isScalar, isSeq, parseDocument } = requirePolicyDependency(yamlEntry);
 
+const MANAGED_CONTROL_FILES = new Set(
+  managedControlFilePaths(JSON.parse(
+    readFileSync(new URL("../.web-design/managed-files.json", import.meta.url), "utf8")
+  )).map(canonicalRepositoryPath)
+);
 
-const FORBIDDEN_SEGMENTS = new Set([
-  ".next",
-  ".vinext",
-  ".wrangler",
-  "coverage",
-  "dist",
-  "node_modules"
-]);
+const FORBIDDEN_SEGMENTS = new Set(FORBIDDEN_REPOSITORY_SEGMENTS);
 const FORBIDDEN_NAMES = [
   /^\.DS_Store$/,
   /^\.env(?:\..+)?$/,
@@ -109,6 +113,11 @@ const SUBCOMMAND_CHECK = new Set([
   "gradlew", "./gradlew", "rake", "bundle", "composer", "poetry", "pipenv", "uv",
   "swift"
 ]);
+// Swift is the one hybrid in the subcommand class: `swift test` dispatches a
+// subcommand, while `swift scripts/check.swift` executes the repository file
+// directly. Keep that grammar explicit so file-shaped Make targets and other
+// generic subcommand operands cannot regain the same allowance.
+const DIRECT_FILE_SUBCOMMAND_CHECK = new Set(["swift"]);
 const PRODUCT_CHECK_EXECUTABLE = new Set([
   ...SELF_SUFFICIENT_CHECK,
   ...RUNTIME_CHECK,
@@ -143,6 +152,13 @@ const SCRIPT_NAME_DISPATCH = new Set(["npm", "pnpm", "yarn"]);
 // something in it is a real check: `npm ci --prefix website && npm run check
 // --prefix website` passes, `npm install` on its own does not.
 const DEPENDENCY_VERB = new Set(["ci", "install"]);
+// A generic verb can mean dependency preparation for a specific tool.
+// Bundler's `check` verifies only that Gemfile dependencies are installed; it
+// may precede a real test but never counts as one. Keep such exceptions tied
+// to their tool instead of weakening the useful `check` verb everywhere.
+const DEPENDENCY_PREPARATION_VERB_BY_TOOL = new Map([
+  ["bundle", new Set(["check"])]
+]);
 // `npm run` lists the scripts and exits zero, so a dispatching verb is a
 // target only once the name follows it, and immediately: reading
 // `npm run --workspace website` as a dispatch would mean knowing which options
@@ -272,7 +288,7 @@ function isRepositoryDirectoryWord(word) {
   if (!/^[@A-Za-z0-9._/-]+$/.test(word)) return false;
   const segments = normalizedRelativeSegments(word);
   if (segments === null) return false;
-  return segments.every((segment) => !FORBIDDEN_SEGMENTS.has(segment));
+  return segments.every((segment) => !isRestrictedRepositorySegment(segment));
 }
 
 function informsInsteadOfRunning(words, { versionIsShort = false } = {}) {
@@ -321,14 +337,56 @@ function isFileWord(word) {
 // A runtime's operand has to be a path the repository could actually hold, so
 // absolute paths, home-relative paths, drive letters, and anything climbing
 // out of the tree are not targets.
-function isRepositoryFileWord(word) {
+function isRepositoryFileWord(word, workingDirectory = ".") {
   // `python3 -c "'' # scripts/check.py"` hides a comment and a source string
   // behind something path-shaped, so a file operand has to read as a plain
   // path: literal path characters only, nothing quoted, spaced, or commented.
-  if (!/^[A-Za-z0-9._/-]+$/.test(word)) return false;
+  if (!/^[@A-Za-z0-9._/-]+$/.test(word)) return false;
   if (!isFileWord(word)) return false;
   if (word.startsWith("/")) return false;
-  return normalizedRelativeSegments(word) !== null;
+  const literalSegments = word.split("/").filter(Boolean);
+  // Inspect the path as written before reducing it. Besides making aliases
+  // such as NODE_MODULES. fail on case-insensitive/Windows filesystems, this
+  // prevents `safe-link/../script.mjs` from hiding a symlink traversal.
+  if (literalSegments.some((segment) => segment === ".." || isRestrictedRepositorySegment(segment))) {
+    return false;
+  }
+  const segments = normalizedRelativeSegments(word);
+  if (segments === null || segments.some(isRestrictedRepositorySegment)) return false;
+  const base = normalizeProjectOwnedDirectory(workingDirectory);
+  if (base === null) return false;
+  const repositoryPath = base === "."
+    ? segments.join("/")
+    : `${base}/${segments.join("/")}`;
+  return !MANAGED_CONTROL_FILES.has(canonicalRepositoryPath(repositoryPath));
+}
+
+function canonicalRepositoryPath(value) {
+  return String(value)
+    .split("/")
+    .filter((segment) => segment && segment !== ".")
+    .map(canonicalRepositorySegment)
+    .join("/");
+}
+
+export function managedControlFilePaths(ownership) {
+  if (ownership?.schemaVersion !== 1 || !Array.isArray(ownership.files)) {
+    throw new Error("Invalid managed-files ownership manifest");
+  }
+  return ownership.files.map((entry, index) => {
+    const path = typeof entry === "string" ? entry : entry?.path;
+    const segments = typeof path === "string" ? path.split("/") : [];
+    if (
+      typeof path !== "string" ||
+      !/^[A-Za-z0-9._/-]+$/.test(path) ||
+      path.startsWith("/") ||
+      /^[A-Za-z]:/.test(path) ||
+      segments.some((segment) => !segment || segment === "." || segment === "..")
+    ) {
+      throw new Error(`Invalid managed-files ownership entry at index ${index}`);
+    }
+    return path;
+  });
 }
 
 // A dispatched command has to be found, not guessed, and finding it past
@@ -346,9 +404,10 @@ function dispatchTargetIndex(words) {
   return 1;
 }
 
-function commandPositionIsTarget(words, executable) {
+function commandPositionIsTarget(words, executable, workingDirectory) {
   const first = bareWord(words[0]);
   if (!first || first.startsWith("-")) return false;
+  if (DEPENDENCY_PREPARATION_VERB_BY_TOOL.get(executable)?.has(first)) return false;
   if (VERB_NEEDING_ARGUMENT.has(first)) {
     // `npm run check` names a script the package defines: unreadable from
     // here, and a name is enough. Everything else names a command — `npm exec
@@ -368,9 +427,17 @@ function commandPositionIsTarget(words, executable) {
     const index = dispatchTargetIndex(words);
     if (index < 0) return false;
     const dispatched = bareWord(words[index]);
-    if (isRepositoryFileWord(dispatched)) return true;
-    const child = executableBasename(dispatched);
-    return PRODUCT_CHECK_EXECUTABLE.has(child) && runsProjectCode(child, words.slice(index + 1));
+    if (isRepositoryFileWord(dispatched, workingDirectory)) return true;
+    // A path-qualified executable is either a reviewed script (handled just
+    // above) or an alias that must not inherit trust from its basename.
+    // `./gradlew` is allowed only because that exact spelling is explicit in
+    // the executable set.
+    const child = dispatched;
+    return PRODUCT_CHECK_EXECUTABLE.has(child) && runsProjectCode(
+      child,
+      words.slice(index + 1),
+      workingDirectory
+    );
   }
   // `swift test list` lists the test methods and runs none of them: the same
   // promise the reporting options make, worn as a subcommand. This is Swift's
@@ -388,7 +455,13 @@ function commandPositionIsTarget(words, executable) {
   if (VERDICT_VERB.has(first)) {
     return words.some((word) => VERDICT_FLAG.has(bareWord(word)));
   }
-  return PRODUCT_CHECK_VERB.has(first) || isRepositoryFileWord(first);
+  // A bare file is meaningful only in a grammar that explicitly executes it:
+  // runtime and hybrid grammars are handled before this helper, and
+  // dispatching verbs handle it in their own branch. Generic subcommand tools
+  // read this position as a verb or target instead.
+  // In particular, `make ./Makefile` asks Make to update the Makefile target;
+  // it can exit zero without running any validation recipe.
+  return PRODUCT_CHECK_VERB.has(first);
 }
 
 // A runtime's operand is the first word that is not a flag. Everything before
@@ -413,10 +486,24 @@ function preparesDependencies(executable, words) {
   })) {
     return false;
   }
-  return DEPENDENCY_VERB.has(bareWord(words[0]));
+  const first = bareWord(words[0]);
+  return (
+    DEPENDENCY_VERB.has(first) ||
+    DEPENDENCY_PREPARATION_VERB_BY_TOOL.get(executable)?.has(first) === true
+  );
 }
 
-function runsProjectCode(executable, words) {
+function runsProjectCode(executable, words, workingDirectory = ".") {
+  const first = bareWord(words[0]);
+  if (
+    DIRECT_FILE_SUBCOMMAND_CHECK.has(executable) &&
+    isRepositoryFileWord(first, workingDirectory)
+  ) {
+    // As with a runtime, later words belong to the reviewed script rather than
+    // to Swift itself, so `swift scripts/check.swift -V` still executes the
+    // script instead of asking the compiler for its version.
+    return true;
+  }
   const isRuntime = RUNTIME_CHECK.has(executable);
   const operand = isRuntime ? runtimeOperandIndex(words) : -1;
   const informs = informsInsteadOfRunning(isRuntime ? words.slice(0, Math.max(operand, 0)) : words, {
@@ -440,10 +527,13 @@ function runsProjectCode(executable, words) {
     // that cannot be said another way: `node --test tests/a.mjs` becomes a
     // package script or `node scripts/check.mjs`, which is how the template's
     // own suite runs `node --test` already.
-    const first = bareWord(words[0]);
-    return Boolean(first) && !first.startsWith("-") && isRepositoryFileWord(first);
+    return (
+      Boolean(first) &&
+      !first.startsWith("-") &&
+      isRepositoryFileWord(first, workingDirectory)
+    );
   }
-  return commandPositionIsTarget(words, executable);
+  return commandPositionIsTarget(words, executable, workingDirectory);
 }
 
 const SHELL_CONTROL_CHARACTERS = /[;|&`<>(){}$\\]/;
@@ -618,7 +708,7 @@ function withoutQuoteCharacters(segment) {
   return bare;
 }
 
-export function validateProductCheckCommand(command) {
+export function validateProductCheckCommand(command, { workingDirectory = "." } = {}) {
   let checks = 0;
   if (/[\n\r]/.test(command)) return "must be a single line";
   const segments = splitOutsideQuotes(command);
@@ -670,7 +760,11 @@ export function validateProductCheckCommand(command) {
       );
     });
     if (abbreviated) return "must spell out its options rather than abbreviate them";
-    const executable = executableBasename(words[0]);
+    // Trust the exact executable spelling. Reducing `./tools/node` or
+    // `/usr/bin/npm` to a basename lets an arbitrary binary impersonate an
+    // approved tool; the only path-qualified exception is the explicitly
+    // allowlisted `./gradlew` wrapper.
+    const executable = bareWord(words[0]);
     if (!PRODUCT_CHECK_EXECUTABLE.has(executable)) {
       return "must execute a real product check";
     }
@@ -679,10 +773,13 @@ export function validateProductCheckCommand(command) {
     // `npm --prefix build --version`. The executable only says which tool
     // runs; what it is pointed at is what makes the check real.
     const rest = words.slice(1);
-    if (!runsProjectCode(executable, rest) && !preparesDependencies(executable, rest)) {
+    if (
+      !runsProjectCode(executable, rest, workingDirectory) &&
+      !preparesDependencies(executable, rest)
+    ) {
       return "must execute a real product check";
     }
-    if (runsProjectCode(executable, rest)) checks += 1;
+    if (runsProjectCode(executable, rest, workingDirectory)) checks += 1;
   }
   if (!checks) return "must execute a real product check";
   return null;
@@ -752,19 +849,24 @@ export function validateProjectConfig(config, profiles = []) {
         failures.push(`commands.check[${index}].run must be a non-empty string`);
         continue;
       }
-      const problem = validateProductCheckCommand(check.run);
+      const workingDirectory = Object.hasOwn(check, "workingDirectory")
+        ? normalizeProjectOwnedDirectory(check.workingDirectory)
+        : ".";
+      if (workingDirectory === null) {
+        failures.push(
+          `commands.check[${index}].workingDirectory must name project-owned source inside the repository`
+        );
+      }
+      const problem = validateProductCheckCommand(check.run, {
+        workingDirectory: workingDirectory ?? "."
+      });
       if (problem) failures.push(`commands.check[${index}].run ${problem}`);
     }
   }
   const rootDirectory = config?.deployment?.rootDirectory;
-  const normalizedRoot = typeof rootDirectory === "string" ? normalize(rootDirectory) : "";
-  if (
-    !normalizedRoot ||
-    isAbsolute(normalizedRoot) ||
-    normalizedRoot === ".." ||
-    normalizedRoot.startsWith(`..${sep}`)
-  ) {
-    failures.push("deployment.rootDirectory must stay inside the repository");
+  const normalizedRoot = normalizeProjectOwnedDirectory(rootDirectory);
+  if (normalizedRoot === null) {
+    failures.push("deployment.rootDirectory must name project-owned source inside the repository");
   }
   if (config?.deployment?.productionBranch !== "main") {
     failures.push("deployment.productionBranch must be main");
@@ -1739,12 +1841,30 @@ function stepTouchesEnvironmentFiles(step) {
   return STEP_ENVIRONMENT_FILE.test(run.value);
 }
 
-function dispatchOnlyJob(job) {
+// Naming an environment is not the same as being protected by one. GitHub
+// creates an environment on first use with no rules on it, so a branch copy
+// that renames `environment` to something an operator has never seen gets its
+// write token from an environment nobody restricted, having already deleted
+// the `if` that was the other half of the gate. The names a write-capable
+// dispatch job may carry are therefore the ones the setup guide tells an
+// operator to restrict, and they ship in managed workflows, so the set is
+// knowable here rather than a property of the file being scanned. Adding a
+// privileged manual workflow means adding its environment to this set and to
+// `docs/operations/github-setup.md` together, in a reviewed change.
+const PROTECTED_DISPATCH_ENVIRONMENT = new Set([
+  "codex-review-dispatch",
+  "web-design-update"
+]);
+
+// Why a job's write permissions are refused, so the message can say which
+// half of the gate is missing: an environment that is merely present reads as
+// gated to an author and is not.
+function dispatchGate(job) {
   const conditionNode = mapPair(job, "if")?.value;
-  if (!isScalar(conditionNode) || typeof conditionNode.value !== "string") return false;
-  if (conditionNode.anchor || conditionNode.tag) return false;
+  if (!isScalar(conditionNode) || typeof conditionNode.value !== "string") return "ungated";
+  if (conditionNode.anchor || conditionNode.tag) return "ungated";
   const condition = conditionNode.value.replace(/^\$\{\{\s*/, "").replace(/\s*\}\}$/, "").trim();
-  if (condition.includes("||") || condition.includes("?")) return false;
+  if (condition.includes("||") || condition.includes("?")) return "ungated";
   const parts = condition.split(/\s*&&\s*/);
   const dispatchEvent = parts.some((part) =>
     /^\(*\s*github\.event_name\s*==\s*["']workflow_dispatch["']\s*\)*$/.test(part)
@@ -1752,17 +1872,27 @@ function dispatchOnlyJob(job) {
   const defaultBranch = parts.some((part) =>
     /^\(*\s*github\.ref\s*==\s*format\(\s*["']refs\/heads\/\{0\}["']\s*,\s*github\.event\.repository\.default_branch\s*\)\s*\)*$/.test(part)
   );
+  if (!dispatchEvent || !defaultBranch) return "ungated";
   // The condition cannot enforce itself: a manual run picks a ref, GitHub
   // loads that ref's copy of the workflow, and a branch copy can simply delete
   // the `if`. What a branch cannot rewrite is an environment — GitHub decides
   // which refs may deploy to one — so a write-capable dispatch job has to name
-  // one, with its deployment branches restricted to the default branch in the
-  // repository settings. `docs/operations/github-setup.md` carries that step.
+  // a restricted one, with its deployment branches held to the default branch
+  // in the repository settings. `docs/operations/github-setup.md` carries that
+  // step for each name in the set above.
   const environment = mapPair(job, "environment")?.value;
+  const name = isMap(environment) ? mapPair(environment, "name")?.value : environment;
+  // The name is matched exactly and never resolved: `${{ … }}` is decided at
+  // run time on the branch's terms, and a quoted `"web-design-update "` names
+  // a second, unrestricted environment that reads like the first. Neither is
+  // in the set, so both are refused without a rule of their own.
   const guarded =
-    (isScalar(environment) && typeof environment.value === "string" && environment.value.trim()) ||
-    (isMap(environment) && mapPair(environment, "name") !== undefined);
-  return dispatchEvent && defaultBranch && Boolean(guarded);
+    isScalar(name) &&
+    typeof name.value === "string" &&
+    !name.anchor &&
+    !name.tag &&
+    PROTECTED_DISPATCH_ENVIRONMENT.has(name.value);
+  return guarded ? "gated" : "unprotected-environment";
 }
 
 function directUnsupportedConstructs(node, { blockScalar = false, mergeKey = false } = {}) {
@@ -2136,10 +2266,17 @@ export function validateWorkflowText(path, text) {
           }
         }
         if (!jobPermissions) continue;
-        if (refSelectable && writes && !dispatchOnlyJob(jobPair.value)) {
-          failures.push(
-            `Ref-selectable job ${jobName} may not grant write permissions: ${path}`
-          );
+        if (refSelectable && writes) {
+          const gate = dispatchGate(jobPair.value);
+          if (gate === "unprotected-environment") {
+            failures.push(
+              `Ref-selectable job ${jobName} must name a restricted environment (${[...PROTECTED_DISPATCH_ENVIRONMENT].join(", ")}): ${path}`
+            );
+          } else if (gate !== "gated") {
+            failures.push(
+              `Ref-selectable job ${jobName} may not grant write permissions: ${path}`
+            );
+          }
         }
       }
     }
@@ -2169,7 +2306,7 @@ export function scanRepository(root) {
     const config = JSON.parse(readFileSync(join(root, ".web-design/project.json"), "utf8"));
     failures.push(...validateProjectConfig(config, profiles));
     const profile = profiles[config?.project?.profile];
-    const deploymentRoot = config?.deployment?.rootDirectory || ".";
+    const deploymentRoot = normalizeProjectOwnedDirectory(config?.deployment?.rootDirectory) ?? ".";
     for (const required of profile?.requiredProjectFiles ?? []) {
       if (!existsSync(join(root, deploymentRoot, required))) {
         failures.push(`Profile ${profile.id} requires ${join(deploymentRoot, required)}`);
