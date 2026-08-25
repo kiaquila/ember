@@ -203,6 +203,68 @@ test("push counts as branch-controlled unless it is pinned to the trusted branch
   assert.deepEqual(checkWorkflow("tag-ignore-all.yml", tagIgnoreAll), []);
 });
 
+test("a write-capable workflow may not name an actor-controlled ref", () => {
+  /* A trusted event runs the default branch's workflow file, so the file is
+     trusted — but the code it checks out need not be. */
+  const pinned = `actions/checkout@${"a".repeat(40)}`;
+  const checkout = [
+    "on:",
+    "  issue_comment:",
+    "    types: [created]",
+    "permissions:",
+    "  contents: write",
+    "jobs:",
+    "  a:",
+    "    steps:",
+    `      - uses: ${pinned}`,
+    "        with:",
+    "          ref: refs/pull/${{ github.event.issue.number }}/head",
+    "      - run: npm ci"
+  ].join("\n");
+  assert.match(
+    checkWorkflow("attack.yml", checkout).join("\n"),
+    /names an actor-controlled ref in attack\.yml/
+  );
+
+  /* The shell can fetch one too, so enumerating checkout actions is not
+     enough — the ref itself is what is banned. */
+  const viaCli = [
+    "on:",
+    "  issue_comment:",
+    "    types: [created]",
+    "permissions:",
+    "  contents: write",
+    "jobs:",
+    "  a:",
+    "    steps:",
+    "      - run: gh pr checkout 1 && npm ci"
+  ].join("\n");
+  assert.match(checkWorkflow("cli.yml", viaCli).join("\n"), /names an actor-controlled ref/);
+
+  /* Without a write scope there is no token worth stealing, so reading a
+     pull request is ordinary work. */
+  const readOnly = viaCli.replace("  contents: write", "  contents: read");
+  assert.deepEqual(checkWorkflow("read.yml", readOnly), []);
+
+  /* `github.event.repository.*` is chosen by the repository, not an actor —
+     it is how the review-rerun workflow pins its trusted checkout. */
+  const trusted = [
+    "on:",
+    "  pull_request_review:",
+    "    types: [submitted]",
+    "permissions:",
+    "  actions: write",
+    "  contents: read",
+    "jobs:",
+    "  a:",
+    "    steps:",
+    `      - uses: ${pinned}`,
+    "        with:",
+    "          ref: ${{ github.event.repository.default_branch }}"
+  ].join("\n");
+  assert.deepEqual(checkWorkflow("rerun.yml", trusted), []);
+});
+
 test("a merge-queue run is branch-controlled too", () => {
   /* The merge-group commit already contains the pull request's own workflow
      changes, so it is the proposed code by another name. */

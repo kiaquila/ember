@@ -243,9 +243,50 @@ export function checkWorkflow(name, text) {
     );
   }
 
+  /* A trusted-event workflow's *file* is trusted, but the *code it checks
+     out* need not be. A write-capable job may therefore not name a ref an
+     actor chooses. Banning the inputs is what keeps this one rule from
+     becoming a list of acquisition commands to enumerate. */
+  if (grants.some((grant) => grant === "write" || grant === "write-all")) {
+    for (const reference of actorControlledRefs(workflow)) {
+      failures.push(`Write-capable workflow names an actor-controlled ref in ${name}: ${reference}`);
+    }
+  }
+
   failures.push(...unpinnedActions(name, actionReferences(workflow)));
 
   return failures;
+}
+
+/* Refs an actor picks: a pull request's head, a commenter's issue number, a
+   dispatch payload. `github.event.repository.*` is not one of them. */
+const ACTOR_CONTROLLED_REF = [
+  /refs\/pull\//i,
+  /\bpull\/[^\s"']*\/(?:head|merge)\b/i,
+  /\bFETCH_HEAD\b/,
+  /\bgh\s+pr\s+(?:checkout|diff|view)\b/i,
+  /github\.head_ref\b/,
+  /github\.event\.(?:issue|comment|pull_request|client_payload|workflow_run)\b/
+];
+
+/** Every actor-controlled ref the workflow's steps check out or execute. */
+function actorControlledRefs(workflow) {
+  const found = [];
+  for (const job of Object.values(workflow.jobs ?? {})) {
+    if (!job || typeof job !== "object") continue;
+    for (const step of Array.isArray(job.steps) ? job.steps : []) {
+      if (!step || typeof step !== "object") continue;
+      /* The ref a checkout takes, and any shell that could fetch one. */
+      for (const value of [step.with?.ref, step.with?.repository, step.run]) {
+        if (typeof value !== "string") continue;
+        for (const pattern of ACTOR_CONTROLLED_REF) {
+          const match = value.match(pattern);
+          if (match) found.push(match[0]);
+        }
+      }
+    }
+  }
+  return [...new Set(found)];
 }
 
 /* A tag or branch reference is mutable, so a compromised action would run here
