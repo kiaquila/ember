@@ -5,6 +5,10 @@ on:
   push:
     branches:
       - main
+  # Keeps osv-scan running against newly disclosed advisories on a quiet
+  # repository, which a push-only trigger would not.
+  schedule:
+    - cron: "0 6 * * 1"
   workflow_dispatch:
 
 permissions:

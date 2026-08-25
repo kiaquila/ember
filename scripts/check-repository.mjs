@@ -100,7 +100,72 @@ export function checkRepository(root, files = trackedFiles(root)) {
   return [...new Set(failures)];
 }
 
-/** The three workflow properties that decide whether a token can leak. */
+/* Triggers whose workflow file GitHub reads from the ref being proposed or
+   selected, rather than from the default branch. A branch can therefore
+   rewrite these workflows, so a write grant in one is a write token a branch
+   can point at itself. `issue_comment`, `pull_request_review`, `push`,
+   `schedule` and `workflow_run` always run the default branch's copy, which
+   is why the review-rerun workflow may hold `actions: write`. */
+const PROPOSED_REF_TRIGGERS = new Set(["pull_request", "workflow_dispatch"]);
+
+/** The keys of a workflow's top-level `on:` block. */
+function triggers(text) {
+  const found = new Set();
+  for (const [, inline] of text.matchAll(/^on:\s*(.*)$/gm)) {
+    /* `on: [pull_request, push]` and `on: push` are both valid shorthand. */
+    for (const key of inline.replace(/[[\]]/g, " ").split(",")) {
+      if (key.trim()) found.add(key.trim());
+    }
+  }
+  const block = blockEntries(text, /^on:\s*$/m);
+  for (const [key] of block) found.add(key);
+  return found;
+}
+
+/** Every permission value a workflow grants, top-level and per job. */
+function permissionGrants(text) {
+  const grants = [];
+  const lines = text.split("\n");
+  for (const [index, line] of lines.entries()) {
+    const match = line.match(/^(\s*)permissions:\s*(.*?)\s*(?:#.*)?$/);
+    if (!match) continue;
+    const [, indent, inline] = match;
+    /* `permissions: write-all` and `permissions: {}` are single-line forms. */
+    if (inline) {
+      grants.push(unquote(inline));
+      continue;
+    }
+    for (const [, value] of nestedEntries(lines, index, indent.length)) {
+      grants.push(value);
+    }
+  }
+  return grants;
+}
+
+function unquote(value) {
+  return value.trim().replace(/^["']|["']$/g, "");
+}
+
+/** `key: value` pairs indented under the line at `index`. */
+function nestedEntries(lines, index, indent) {
+  const entries = [];
+  for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+    const line = lines[cursor];
+    if (!line.trim() || /^\s*#/.test(line)) continue;
+    if (line.match(/^\s*/)[0].length <= indent) break;
+    const entry = line.match(/^\s*([A-Za-z][\w-]*):\s*(.*?)\s*(?:#.*)?$/);
+    if (entry) entries.push([entry[1], unquote(entry[2])]);
+  }
+  return entries;
+}
+
+function blockEntries(text, header) {
+  const lines = text.split("\n");
+  const index = lines.findIndex((line) => header.test(line));
+  return index === -1 ? [] : nestedEntries(lines, index, lines[index].match(/^\s*/)[0].length);
+}
+
+/** The workflow properties that decide whether a token can leak. */
 export function checkWorkflow(name, text) {
   const failures = [];
 
@@ -113,8 +178,19 @@ export function checkWorkflow(name, text) {
   if (!/^permissions:\s*(?:\n|$)/m.test(text)) {
     failures.push(`Workflow must declare top-level permissions: ${name}`);
   }
-  if (/^permissions:\s*["']?write-all["']?\s*$/m.test(text)) {
+
+  const grants = permissionGrants(text);
+  if (grants.includes("write-all")) {
     failures.push(`Workflow may not use write-all: ${name}`);
+  }
+  /* A branch-selectable workflow may not hold any write scope, however it is
+     spelled — `write-all` is only the loudest version of the same grant. */
+  const proposedRef = [...triggers(text)].filter((trigger) => PROPOSED_REF_TRIGGERS.has(trigger));
+  if (proposedRef.length > 0 && grants.some((grant) => grant === "write" || grant === "write-all")) {
+    failures.push(
+      `Workflow grants write permission on a branch-selectable trigger ` +
+      `(${proposedRef.sort().join(", ")}) in ${name}`
+    );
   }
 
   /* A tag or branch reference is mutable, so a compromised action would run

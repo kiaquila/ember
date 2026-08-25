@@ -96,6 +96,56 @@ test("workflows must be permission-scoped and SHA-pinned", () => {
   );
 });
 
+test("a branch-selectable workflow may not hold any write scope", () => {
+  /* `pull_request` and `workflow_dispatch` run the workflow file from the ref
+     being proposed or selected, so a branch could grant itself the token. */
+  const topLevel = [
+    "on:",
+    "  pull_request:",
+    "permissions:",
+    "  contents: write",
+    "jobs: {}"
+  ].join("\n");
+  assert.match(
+    checkWorkflow("pr.yml", topLevel).join("\n"),
+    /grants write permission on a branch-selectable trigger \(pull_request\)/
+  );
+
+  /* A job-level override is the same grant, one level down. */
+  const jobLevel = [
+    "on:",
+    "  workflow_dispatch:",
+    "permissions:",
+    "  contents: read",
+    "jobs:",
+    "  release:",
+    "    permissions:",
+    "      contents: write"
+  ].join("\n");
+  assert.match(
+    checkWorkflow("dispatch.yml", jobLevel).join("\n"),
+    /grants write permission on a branch-selectable trigger \(workflow_dispatch\)/
+  );
+
+  /* Shorthand trigger lists are the same triggers. */
+  const shorthand = ["on: [pull_request, push]", "permissions:", "  contents: write"].join("\n");
+  assert.match(checkWorkflow("short.yml", shorthand).join("\n"), /branch-selectable trigger/);
+
+  /* Trusted events always run the default branch's copy, so the review-rerun
+     workflow's `actions: write` is not a branch-controlled grant. */
+  const trusted = [
+    "on:",
+    "  issue_comment:",
+    "    types: [created]",
+    "  pull_request_review:",
+    "    types: [submitted]",
+    "permissions:",
+    "  actions: write",
+    "  contents: read"
+  ].join("\n");
+  assert.deepEqual(checkWorkflow("rerun.yml", trusted), []);
+});
+
 test("this repository's own workflow shape passes", () => {
   const safe = [
     "name: Project CI",
