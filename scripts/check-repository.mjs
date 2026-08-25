@@ -287,6 +287,15 @@ export function checkActionManifest(name, text) {
   const references = steps
     .filter((step) => step && typeof step.uses === "string")
     .map((step) => step.uses);
+
+  /* A Docker action names its image here instead of in a step. A Dockerfile
+     path is this repository's own code and is built from the commit; a
+     registry image is external and mutable unless it names a digest. */
+  const image = manifest.runs?.image;
+  if (typeof image === "string" && image.startsWith("docker://")) {
+    references.push(image);
+  }
+
   return unpinnedActions(name, references);
 }
 

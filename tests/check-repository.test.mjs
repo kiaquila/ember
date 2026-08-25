@@ -226,6 +226,16 @@ test("a local action's own steps are pinned like a workflow's", () => {
   const pinned = ["runs:", "  using: composite", "  steps:", `    - uses: owner/action@${"a".repeat(40)}`].join("\n");
   assert.deepEqual(checkActionManifest(".github/actions/x/action.yml", pinned), []);
 
+  /* A Docker action names its image instead of a step. */
+  const image = (value) => ["runs:", "  using: docker", `  image: ${value}`].join("\n");
+  assert.match(
+    checkActionManifest("action.yml", image("docker://owner/image:latest")).join("\n"),
+    /Container action is not pinned to a digest/
+  );
+  assert.deepEqual(checkActionManifest("action.yml", image(`docker://owner/image@sha256:${"a".repeat(64)}`)), []);
+  /* A Dockerfile is this repository's own code, built from the commit. */
+  assert.deepEqual(checkActionManifest("action.yml", image("Dockerfile")), []);
+
   /* A manifest with no steps at all is fine; an unreadable one is not. */
   assert.deepEqual(checkActionManifest("action.yml", "runs:\n  using: node20\n  main: index.js\n"), []);
   assert.match(
