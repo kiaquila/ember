@@ -9,5 +9,8 @@
   "engines": {
     "node": ">=22.18.0"
   },
-  "description": "Ember — an interactive burn study for the ks·design lab"
+  "description": "Ember — an interactive burn study for the ks·design lab",
+  "devDependencies": {
+    "yaml": "^2.9.0"
+  }
 }

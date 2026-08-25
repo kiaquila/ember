@@ -109,7 +109,9 @@ at the time, are recorded in
 - `npm --prefix website run check` — the build plus its tests, including the
   size budget for the four published files. This is the project's real check.
 - `npm run check` — the repository guard: tracked generated output, committed
-  secrets, symbolic links, and workflow permissions and action pinning.
+  secrets, symbolic links, and workflow permissions and action pinning. It
+  parses the workflows with the same YAML the runner uses, which is the root's
+  one dependency; `npm ci` installs it.
 - `npm test` — the guard's own tests and the Codex review gate's rules.
 - `npm --prefix website run dev` — build and serve `dist/` on port 4660.
 - Verify by hand: hover ignition and recovery, the full Play cycle (burn →

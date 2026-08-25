@@ -16,6 +16,8 @@ import { basename, join, resolve, sep } from "node:path";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
+import { parse } from "yaml";
+
 /** Directories that are built, installed or cached — never committed. */
 const GENERATED_DIRECTORIES = new Set([
   ".wrangler",
@@ -113,144 +115,98 @@ const BRANCH_CONTROLLED_TRIGGERS = new Set(["pull_request", "workflow_dispatch"]
    ever run that branch's own copy of the workflow. */
 const DEFAULT_BRANCH = "main";
 
-/** The lines indented under `lines[index]`, excluding blanks and comments. */
-function nestedLines(lines, index) {
-  const indent = lines[index].match(/^\s*/)[0].length;
-  const block = [];
-  for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
-    const line = lines[cursor];
-    if (!line.trim() || /^\s*#/.test(line)) continue;
-    if (line.match(/^\s*/)[0].length <= indent) break;
-    block.push(line);
-  }
-  return block;
-}
-
-function unquote(value) {
-  return value.trim().replace(/^["']|["']$/g, "");
-}
-
-/** `key: value` pairs directly under `lines[index]`, one level down only. */
-function childEntries(lines, index) {
-  const block = nestedLines(lines, index);
-  if (block.length === 0) return [];
-  const childIndent = Math.min(...block.map((line) => line.match(/^\s*/)[0].length));
-  return block
-    .filter((line) => line.match(/^\s*/)[0].length === childIndent)
-    .map((line) => line.match(/^\s*([A-Za-z][\w-]*):\s*(.*?)\s*(?:#.*)?$/))
-    .filter(Boolean)
-    .map((entry) => [entry[1], unquote(entry[2])]);
-}
-
-function findLine(lines, pattern) {
-  return lines.findIndex((line) => pattern.test(line));
-}
-
-/** The keys of a workflow's top-level `on:` block. */
-function triggers(text) {
-  const lines = text.split("\n");
-  const found = new Set();
-  const index = findLine(lines, /^on:/);
-  if (index === -1) return found;
-
-  /* `on: push` and `on: [pull_request, push]` are both valid shorthand. */
-  const inline = lines[index].replace(/^on:\s*/, "").replace(/#.*$/, "").trim();
-  if (inline) {
-    for (const key of inline.replace(/[[\]]/g, " ").split(",")) {
-      if (key.trim()) found.add(unquote(key));
-    }
-    return found;
-  }
-  for (const [key] of childEntries(lines, index)) found.add(key);
-  return found;
+/* Workflows are parsed rather than pattern-matched. Reading them line by line
+   invites a long tail of valid YAML spellings the reader does not know —
+   a quoted key, a flow-style step map — each of which is a hole rather than a
+   cosmetic miss, so the guard uses the same YAML the runner does. */
+function triggerNames(on) {
+  if (typeof on === "string") return [on];
+  if (Array.isArray(on)) return on.filter((entry) => typeof entry === "string");
+  return on && typeof on === "object" ? Object.keys(on) : [];
 }
 
 /** True when `push:` names branch filters and every one is the trusted branch. */
-function pushRestrictedToDefaultBranch(text) {
-  const lines = text.split("\n");
-  const onIndex = findLine(lines, /^on:\s*$/);
-  if (onIndex === -1) return false;
-  const onBlock = nestedLines(lines, onIndex);
-  const pushIndex = findLine(onBlock, /^\s*push:\s*(?:#.*)?$/);
-  if (pushIndex === -1) return false;
-
-  const pushBlock = nestedLines(onBlock, pushIndex);
+function pushRestrictedToDefaultBranch(on) {
+  const push = on && typeof on === "object" && !Array.isArray(on) ? on.push : null;
+  /* `on: push` and `push:` with no filter run for every branch. */
+  if (!push || typeof push !== "object") return false;
   /* `branches-ignore` is an exclusion, so it never proves a restriction. */
-  const branchesIndex = findLine(pushBlock, /^\s*branches:/);
-  if (branchesIndex === -1) return false;
-
-  const inline = pushBlock[branchesIndex].replace(/^\s*branches:\s*/, "").replace(/#.*$/, "").trim();
-  const listed = inline
-    ? inline.replace(/[[\]]/g, " ").split(",").map(unquote).filter(Boolean)
-    : nestedLines(pushBlock, branchesIndex)
-        .map((line) => line.match(/^\s*-\s*(.+?)\s*(?:#.*)?$/))
-        .filter(Boolean)
-        .map((entry) => unquote(entry[1]));
-
+  const branches = push.branches;
+  const listed = Array.isArray(branches) ? branches : typeof branches === "string" ? [branches] : [];
   return listed.length > 0 && listed.every((branch) => branch === DEFAULT_BRANCH);
 }
 
 /** Triggers in this workflow whose file a branch can rewrite. */
-function branchControlledTriggers(text) {
-  const found = [];
-  for (const trigger of triggers(text)) {
-    if (BRANCH_CONTROLLED_TRIGGERS.has(trigger)) found.push(trigger);
-    else if (trigger === "push" && !pushRestrictedToDefaultBranch(text)) found.push(trigger);
-  }
-  return found.sort();
+function branchControlledTriggers(on) {
+  return triggerNames(on)
+    .filter((trigger) =>
+      BRANCH_CONTROLLED_TRIGGERS.has(trigger) ||
+      (trigger === "push" && !pushRestrictedToDefaultBranch(on))
+    )
+    .sort();
 }
 
 /** Every permission value a workflow grants, top-level and per job. */
-function permissionGrants(text) {
-  const lines = text.split("\n");
-  const grants = [];
-  for (const [index, line] of lines.entries()) {
-    const match = line.match(/^\s*permissions:\s*(.*?)\s*(?:#.*)?$/);
-    if (!match) continue;
-    const inline = match[1];
-    if (!inline) {
-      for (const [, value] of childEntries(lines, index)) grants.push(value);
-      continue;
-    }
-    /* `permissions: { contents: write }` is a flow map, not a scalar; `{}`
-       is the empty one and grants nothing. */
-    const flowMap = inline.match(/^\{(.*)\}$/);
-    if (!flowMap) {
-      grants.push(unquote(inline));
-      continue;
-    }
-    for (const pair of flowMap[1].split(",")) {
-      const entry = pair.match(/^\s*[A-Za-z][\w-]*\s*:\s*(.+?)\s*$/);
-      if (entry) grants.push(unquote(entry[1]));
+function permissionGrants(workflow) {
+  const blocks = [workflow.permissions];
+  for (const job of Object.values(workflow.jobs ?? {})) {
+    if (job && typeof job === "object") blocks.push(job.permissions);
+  }
+  return blocks.flatMap((block) => {
+    /* `permissions: write-all` is a scalar; a map grants per scope, and the
+       empty map grants nothing. */
+    if (typeof block === "string") return [block];
+    return block && typeof block === "object" ? Object.values(block).map(String) : [];
+  });
+}
+
+/** Every action reference the workflow's steps use. */
+function actionReferences(workflow) {
+  const references = [];
+  for (const job of Object.values(workflow.jobs ?? {})) {
+    if (!job || typeof job !== "object") continue;
+    if (typeof job.uses === "string") references.push(job.uses); // reusable workflow
+    for (const step of Array.isArray(job.steps) ? job.steps : []) {
+      if (step && typeof step.uses === "string") references.push(step.uses);
     }
   }
-  return grants;
+  return references;
 }
 
 /** The workflow properties that decide whether a token can leak. */
 export function checkWorkflow(name, text) {
+  let workflow;
+  try {
+    workflow = parse(text);
+  } catch (error) {
+    return [`Workflow is not valid YAML: ${name} (${error.message})`];
+  }
+  if (!workflow || typeof workflow !== "object") {
+    return [`Workflow is not a YAML mapping: ${name}`];
+  }
+
   const failures = [];
+  const on = workflow.on;
 
   /* `pull_request_target` runs the default branch's workflow with a write
      token while a pull request supplies the code it builds. Nothing here
      needs it. */
-  if (/\bpull_request_target\b/.test(text)) {
+  if (triggerNames(on).includes("pull_request_target")) {
     failures.push(`High-risk pull_request_target trigger in ${name}`);
   }
-  /* Any top-level declaration counts, block or inline: `permissions: {}` is
-     the most restrictive one there is. Missing means the workflow inherits
-     whatever the repository default happens to be. */
-  if (!/^permissions:/m.test(text)) {
+  /* Any declaration counts: `permissions: {}` is the most restrictive one
+     there is. Missing means the workflow inherits the repository default. */
+  if (!("permissions" in workflow)) {
     failures.push(`Workflow must declare top-level permissions: ${name}`);
   }
 
-  const grants = permissionGrants(text);
+  const grants = permissionGrants(workflow);
   if (grants.includes("write-all")) {
     failures.push(`Workflow may not use write-all: ${name}`);
   }
   /* A branch-controlled workflow may not hold any write scope, however it is
      spelled — `write-all` is only the loudest version of the same grant. */
-  const branchControlled = branchControlledTriggers(text);
+  const branchControlled = branchControlledTriggers(on);
   if (branchControlled.length > 0 && grants.some((grant) => grant === "write" || grant === "write-all")) {
     failures.push(
       `Workflow grants write permission on a branch-controlled trigger ` +
@@ -260,8 +216,7 @@ export function checkWorkflow(name, text) {
 
   /* A tag or branch reference is mutable, so a compromised action would run
      here on the next push without any change landing in this repository. */
-  for (const match of text.matchAll(/^\s*-?\s*uses:\s*["']?([^\s"']+)["']?\s*(?:#.*)?$/gm)) {
-    const action = match[1];
+  for (const action of actionReferences(workflow)) {
     if (action.startsWith("./") || action.startsWith("docker://")) continue;
     const ref = action.slice(action.lastIndexOf("@") + 1);
     if (!/^[a-f0-9]{40}$/.test(ref)) {

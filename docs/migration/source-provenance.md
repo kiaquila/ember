@@ -143,7 +143,9 @@ template at commit `ea8501fdb90236fcb891e97b15f7a42a62f76ff1` and then reduced
 to what this project needs: `scripts/check-repository.mjs` keeps the tracked-file,
 secret, symlink and workflow rules and drops the policy engine around them, and
 the Codex review gate keeps its trust model and drops the marker comment and the
-second dispatching workflow.
+second dispatching workflow. The guard reads workflows with a YAML parser rather
+than the template's line patterns — the repository root's one dependency — so a
+quoted key or a flow-style step map cannot slip a rule.
 
 **This is a one-time manual borrowing, not an installation.** No lock file,
 release manifest, managed-file list, profile or updater is present, and the

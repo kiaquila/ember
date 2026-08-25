@@ -191,6 +191,51 @@ test("push counts as branch-controlled unless it is pinned to the trusted branch
   assert.deepEqual(checkWorkflow("pinned-inline.yml", pinnedInline), []);
 });
 
+test("YAML spellings a line reader would miss are still read", () => {
+  /* The guard parses workflows rather than scanning them, so a quoted key,
+     a flow-style step map and any other valid spelling reach the same rules. */
+  const quotedKey = ["on:", "  pull_request:", "permissions:", '  "contents": write'].join("\n");
+  assert.match(
+    checkWorkflow("quoted.yml", quotedKey).join("\n"),
+    /grants write permission on a branch-controlled trigger \(pull_request\)/
+  );
+
+  const flowStep = [
+    "on:",
+    "  pull_request:",
+    "permissions: {}",
+    "jobs:",
+    "  a:",
+    "    steps:",
+    "      - { uses: owner/action@main }"
+  ].join("\n");
+  assert.match(
+    checkWorkflow("flow.yml", flowStep).join("\n"),
+    /not pinned to a full SHA in flow\.yml: owner\/action@main/
+  );
+
+  /* A reusable-workflow reference is an action reference too. */
+  const reusable = [
+    "on:",
+    "  pull_request:",
+    "permissions: {}",
+    "jobs:",
+    "  a:",
+    "    uses: owner/repo/.github/workflows/x.yml@v1"
+  ].join("\n");
+  assert.match(checkWorkflow("reusable.yml", reusable).join("\n"), /not pinned to a full SHA/);
+});
+
+test("a workflow the guard cannot parse fails closed", () => {
+  /* Silently passing something unreadable is the one outcome a guard must
+     never have. */
+  assert.match(
+    checkWorkflow("broken.yml", "on:\n  pull_request:\n :::bad[\n").join("\n"),
+    /Workflow is not valid YAML: broken\.yml/
+  );
+  assert.match(checkWorkflow("scalar.yml", "just a string\n").join("\n"), /not a YAML mapping/);
+});
+
 test("this repository's own workflow shape passes", () => {
   const safe = [
     "name: Project CI",
