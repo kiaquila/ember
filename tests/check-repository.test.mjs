@@ -96,7 +96,7 @@ test("workflows must be permission-scoped and SHA-pinned", () => {
   );
 });
 
-test("a branch-selectable workflow may not hold any write scope", () => {
+test("a branch-controlled workflow may not hold any write scope", () => {
   /* `pull_request` and `workflow_dispatch` run the workflow file from the ref
      being proposed or selected, so a branch could grant itself the token. */
   const topLevel = [
@@ -108,7 +108,7 @@ test("a branch-selectable workflow may not hold any write scope", () => {
   ].join("\n");
   assert.match(
     checkWorkflow("pr.yml", topLevel).join("\n"),
-    /grants write permission on a branch-selectable trigger \(pull_request\)/
+    /grants write permission on a branch-controlled trigger \(pull_request\)/
   );
 
   /* A job-level override is the same grant, one level down. */
@@ -124,12 +124,12 @@ test("a branch-selectable workflow may not hold any write scope", () => {
   ].join("\n");
   assert.match(
     checkWorkflow("dispatch.yml", jobLevel).join("\n"),
-    /grants write permission on a branch-selectable trigger \(workflow_dispatch\)/
+    /grants write permission on a branch-controlled trigger \(workflow_dispatch\)/
   );
 
   /* Shorthand trigger lists are the same triggers. */
   const shorthand = ["on: [pull_request, push]", "permissions:", "  contents: write"].join("\n");
-  assert.match(checkWorkflow("short.yml", shorthand).join("\n"), /branch-selectable trigger/);
+  assert.match(checkWorkflow("short.yml", shorthand).join("\n"), /branch-controlled trigger/);
 
   /* Trusted events always run the default branch's copy, so the review-rerun
      workflow's `actions: write` is not a branch-controlled grant. */
@@ -144,6 +144,51 @@ test("a branch-selectable workflow may not hold any write scope", () => {
     "  contents: read"
   ].join("\n");
   assert.deepEqual(checkWorkflow("rerun.yml", trusted), []);
+});
+
+test("an inline permission map is a grant like any other", () => {
+  /* `permissions: { contents: write }` is valid YAML and the same grant. */
+  const inlineMap = [
+    "on:",
+    "  workflow_dispatch:",
+    "permissions:",
+    "  contents: read",
+    "jobs:",
+    "  release:",
+    "    permissions: { contents: write }"
+  ].join("\n");
+  assert.match(
+    checkWorkflow("inline.yml", inlineMap).join("\n"),
+    /grants write permission on a branch-controlled trigger \(workflow_dispatch\)/
+  );
+
+  /* The empty map grants nothing. */
+  const empty = ["on:", "  pull_request:", "permissions: {}"].join("\n");
+  assert.deepEqual(checkWorkflow("empty.yml", empty), []);
+});
+
+test("push counts as branch-controlled unless it is pinned to the trusted branch", () => {
+  /* A push workflow runs the pushed commit's own copy, so any branch that
+     can be pushed can rewrite it — unless the filter excludes every branch
+     but the trusted one. */
+  const write = ["permissions:", "  actions: write"].join("\n");
+  const unfiltered = ["on:", "  push:", write].join("\n");
+  assert.match(
+    checkWorkflow("push.yml", unfiltered).join("\n"),
+    /grants write permission on a branch-controlled trigger \(push\)/
+  );
+
+  const feature = ["on:", "  push:", "    branches:", "      - main", "      - feature/*", write].join("\n");
+  assert.match(checkWorkflow("feature.yml", feature).join("\n"), /branch-controlled trigger \(push\)/);
+
+  /* `branches-ignore` is an exclusion and proves no restriction. */
+  const ignore = ["on:", "  push:", "    branches-ignore:", "      - tmp", write].join("\n");
+  assert.match(checkWorkflow("ignore.yml", ignore).join("\n"), /branch-controlled trigger \(push\)/);
+
+  const pinned = ["on:", "  push:", "    branches:", "      - main", write].join("\n");
+  assert.deepEqual(checkWorkflow("pinned.yml", pinned), []);
+  const pinnedInline = ["on:", "  push:", "    branches: [main]", write].join("\n");
+  assert.deepEqual(checkWorkflow("pinned-inline.yml", pinnedInline), []);
 });
 
 test("this repository's own workflow shape passes", () => {

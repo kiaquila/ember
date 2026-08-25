@@ -100,69 +100,131 @@ export function checkRepository(root, files = trackedFiles(root)) {
   return [...new Set(failures)];
 }
 
-/* Triggers whose workflow file GitHub reads from the ref being proposed or
-   selected, rather than from the default branch. A branch can therefore
-   rewrite these workflows, so a write grant in one is a write token a branch
-   can point at itself. `issue_comment`, `pull_request_review`, `push`,
-   `schedule` and `workflow_run` always run the default branch's copy, which
-   is why the review-rerun workflow may hold `actions: write`. */
-const PROPOSED_REF_TRIGGERS = new Set(["pull_request", "workflow_dispatch"]);
+/* GitHub reads a workflow file from one of two places. `issue_comment`,
+   `pull_request_review`, `schedule` and `workflow_run` always run the default
+   branch's copy, so a branch cannot rewrite them — which is why the
+   review-rerun workflow may hold `actions: write`. `pull_request` and
+   `workflow_dispatch` run the copy on the ref being proposed or selected, and
+   `push` runs the copy in the commit that was pushed; in those, a write grant
+   is a write token a branch can point at its own code. */
+const BRANCH_CONTROLLED_TRIGGERS = new Set(["pull_request", "workflow_dispatch"]);
 
-/** The keys of a workflow's top-level `on:` block. */
-function triggers(text) {
-  const found = new Set();
-  for (const [, inline] of text.matchAll(/^on:\s*(.*)$/gm)) {
-    /* `on: [pull_request, push]` and `on: push` are both valid shorthand. */
-    for (const key of inline.replace(/[[\]]/g, " ").split(",")) {
-      if (key.trim()) found.add(key.trim());
-    }
-  }
-  const block = blockEntries(text, /^on:\s*$/m);
-  for (const [key] of block) found.add(key);
-  return found;
-}
+/* This repository's trusted branch. A `push:` filtered down to it can only
+   ever run that branch's own copy of the workflow. */
+const DEFAULT_BRANCH = "main";
 
-/** Every permission value a workflow grants, top-level and per job. */
-function permissionGrants(text) {
-  const grants = [];
-  const lines = text.split("\n");
-  for (const [index, line] of lines.entries()) {
-    const match = line.match(/^(\s*)permissions:\s*(.*?)\s*(?:#.*)?$/);
-    if (!match) continue;
-    const [, indent, inline] = match;
-    /* `permissions: write-all` and `permissions: {}` are single-line forms. */
-    if (inline) {
-      grants.push(unquote(inline));
-      continue;
-    }
-    for (const [, value] of nestedEntries(lines, index, indent.length)) {
-      grants.push(value);
-    }
+/** The lines indented under `lines[index]`, excluding blanks and comments. */
+function nestedLines(lines, index) {
+  const indent = lines[index].match(/^\s*/)[0].length;
+  const block = [];
+  for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+    const line = lines[cursor];
+    if (!line.trim() || /^\s*#/.test(line)) continue;
+    if (line.match(/^\s*/)[0].length <= indent) break;
+    block.push(line);
   }
-  return grants;
+  return block;
 }
 
 function unquote(value) {
   return value.trim().replace(/^["']|["']$/g, "");
 }
 
-/** `key: value` pairs indented under the line at `index`. */
-function nestedEntries(lines, index, indent) {
-  const entries = [];
-  for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
-    const line = lines[cursor];
-    if (!line.trim() || /^\s*#/.test(line)) continue;
-    if (line.match(/^\s*/)[0].length <= indent) break;
-    const entry = line.match(/^\s*([A-Za-z][\w-]*):\s*(.*?)\s*(?:#.*)?$/);
-    if (entry) entries.push([entry[1], unquote(entry[2])]);
-  }
-  return entries;
+/** `key: value` pairs directly under `lines[index]`, one level down only. */
+function childEntries(lines, index) {
+  const block = nestedLines(lines, index);
+  if (block.length === 0) return [];
+  const childIndent = Math.min(...block.map((line) => line.match(/^\s*/)[0].length));
+  return block
+    .filter((line) => line.match(/^\s*/)[0].length === childIndent)
+    .map((line) => line.match(/^\s*([A-Za-z][\w-]*):\s*(.*?)\s*(?:#.*)?$/))
+    .filter(Boolean)
+    .map((entry) => [entry[1], unquote(entry[2])]);
 }
 
-function blockEntries(text, header) {
+function findLine(lines, pattern) {
+  return lines.findIndex((line) => pattern.test(line));
+}
+
+/** The keys of a workflow's top-level `on:` block. */
+function triggers(text) {
   const lines = text.split("\n");
-  const index = lines.findIndex((line) => header.test(line));
-  return index === -1 ? [] : nestedEntries(lines, index, lines[index].match(/^\s*/)[0].length);
+  const found = new Set();
+  const index = findLine(lines, /^on:/);
+  if (index === -1) return found;
+
+  /* `on: push` and `on: [pull_request, push]` are both valid shorthand. */
+  const inline = lines[index].replace(/^on:\s*/, "").replace(/#.*$/, "").trim();
+  if (inline) {
+    for (const key of inline.replace(/[[\]]/g, " ").split(",")) {
+      if (key.trim()) found.add(unquote(key));
+    }
+    return found;
+  }
+  for (const [key] of childEntries(lines, index)) found.add(key);
+  return found;
+}
+
+/** True when `push:` names branch filters and every one is the trusted branch. */
+function pushRestrictedToDefaultBranch(text) {
+  const lines = text.split("\n");
+  const onIndex = findLine(lines, /^on:\s*$/);
+  if (onIndex === -1) return false;
+  const onBlock = nestedLines(lines, onIndex);
+  const pushIndex = findLine(onBlock, /^\s*push:\s*(?:#.*)?$/);
+  if (pushIndex === -1) return false;
+
+  const pushBlock = nestedLines(onBlock, pushIndex);
+  /* `branches-ignore` is an exclusion, so it never proves a restriction. */
+  const branchesIndex = findLine(pushBlock, /^\s*branches:/);
+  if (branchesIndex === -1) return false;
+
+  const inline = pushBlock[branchesIndex].replace(/^\s*branches:\s*/, "").replace(/#.*$/, "").trim();
+  const listed = inline
+    ? inline.replace(/[[\]]/g, " ").split(",").map(unquote).filter(Boolean)
+    : nestedLines(pushBlock, branchesIndex)
+        .map((line) => line.match(/^\s*-\s*(.+?)\s*(?:#.*)?$/))
+        .filter(Boolean)
+        .map((entry) => unquote(entry[1]));
+
+  return listed.length > 0 && listed.every((branch) => branch === DEFAULT_BRANCH);
+}
+
+/** Triggers in this workflow whose file a branch can rewrite. */
+function branchControlledTriggers(text) {
+  const found = [];
+  for (const trigger of triggers(text)) {
+    if (BRANCH_CONTROLLED_TRIGGERS.has(trigger)) found.push(trigger);
+    else if (trigger === "push" && !pushRestrictedToDefaultBranch(text)) found.push(trigger);
+  }
+  return found.sort();
+}
+
+/** Every permission value a workflow grants, top-level and per job. */
+function permissionGrants(text) {
+  const lines = text.split("\n");
+  const grants = [];
+  for (const [index, line] of lines.entries()) {
+    const match = line.match(/^\s*permissions:\s*(.*?)\s*(?:#.*)?$/);
+    if (!match) continue;
+    const inline = match[1];
+    if (!inline) {
+      for (const [, value] of childEntries(lines, index)) grants.push(value);
+      continue;
+    }
+    /* `permissions: { contents: write }` is a flow map, not a scalar; `{}`
+       is the empty one and grants nothing. */
+    const flowMap = inline.match(/^\{(.*)\}$/);
+    if (!flowMap) {
+      grants.push(unquote(inline));
+      continue;
+    }
+    for (const pair of flowMap[1].split(",")) {
+      const entry = pair.match(/^\s*[A-Za-z][\w-]*\s*:\s*(.+?)\s*$/);
+      if (entry) grants.push(unquote(entry[1]));
+    }
+  }
+  return grants;
 }
 
 /** The workflow properties that decide whether a token can leak. */
@@ -175,7 +237,10 @@ export function checkWorkflow(name, text) {
   if (/\bpull_request_target\b/.test(text)) {
     failures.push(`High-risk pull_request_target trigger in ${name}`);
   }
-  if (!/^permissions:\s*(?:\n|$)/m.test(text)) {
+  /* Any top-level declaration counts, block or inline: `permissions: {}` is
+     the most restrictive one there is. Missing means the workflow inherits
+     whatever the repository default happens to be. */
+  if (!/^permissions:/m.test(text)) {
     failures.push(`Workflow must declare top-level permissions: ${name}`);
   }
 
@@ -183,13 +248,13 @@ export function checkWorkflow(name, text) {
   if (grants.includes("write-all")) {
     failures.push(`Workflow may not use write-all: ${name}`);
   }
-  /* A branch-selectable workflow may not hold any write scope, however it is
+  /* A branch-controlled workflow may not hold any write scope, however it is
      spelled — `write-all` is only the loudest version of the same grant. */
-  const proposedRef = [...triggers(text)].filter((trigger) => PROPOSED_REF_TRIGGERS.has(trigger));
-  if (proposedRef.length > 0 && grants.some((grant) => grant === "write" || grant === "write-all")) {
+  const branchControlled = branchControlledTriggers(text);
+  if (branchControlled.length > 0 && grants.some((grant) => grant === "write" || grant === "write-all")) {
     failures.push(
-      `Workflow grants write permission on a branch-selectable trigger ` +
-      `(${proposedRef.sort().join(", ")}) in ${name}`
+      `Workflow grants write permission on a branch-controlled trigger ` +
+      `(${branchControlled.join(", ")}) in ${name}`
     );
   }
 
