@@ -333,6 +333,29 @@ test("a write-capable workflow may not name an actor-controlled ref", () => {
   assert.deepEqual(checkWorkflow("rerun.yml", trusted), []);
 });
 
+test("job container and service images must name a digest", () => {
+  /* A job's steps run inside its container, so a mutable tag there is the
+     same exposure as a mutable action reference. */
+  const head = ["on:", "  pull_request:", "permissions: {}", "jobs:", "  a:"];
+  assert.match(
+    checkWorkflow("c.yml", [...head, "    container: node:latest"].join("\n")).join("\n"),
+    /Job container image is not pinned to a digest in c\.yml: node:latest/
+  );
+  assert.match(
+    checkWorkflow("m.yml", [...head, "    container:", "      image: owner/image:tag"].join("\n")).join("\n"),
+    /not pinned to a digest/
+  );
+  assert.match(
+    checkWorkflow("s.yml", [...head, "    services:", "      db:", "        image: postgres:16"].join("\n")).join("\n"),
+    /not pinned to a digest/
+  );
+
+  const digest = `node@sha256:${"a".repeat(64)}`;
+  assert.deepEqual(checkWorkflow("ok.yml", [...head, `    container: ${digest}`].join("\n")), []);
+  /* A job with no container at all is the normal case. */
+  assert.deepEqual(checkWorkflow("plain.yml", [...head, "    steps: []"].join("\n")), []);
+});
+
 test("a merge-queue run is branch-controlled too", () => {
   /* The merge-group commit already contains the pull request's own workflow
      changes, so it is the proposed code by another name. */

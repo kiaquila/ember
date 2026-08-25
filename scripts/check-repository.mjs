@@ -255,7 +255,33 @@ export function checkWorkflow(name, text) {
 
   failures.push(...unpinnedActions(name, actionReferences(workflow)));
 
+  /* A job's steps run inside its container, so a mutable image there executes
+     changed external code exactly like a mutable action would. */
+  for (const image of containerImages(workflow)) {
+    if (!/@sha256:[a-f0-9]{64}$/.test(image)) {
+      failures.push(`Job container image is not pinned to a digest in ${name}: ${image}`);
+    }
+  }
+
   return failures;
+}
+
+/** Every container image a job runs steps in or attaches as a service. */
+function containerImages(workflow) {
+  const images = [];
+  for (const job of Object.values(workflow.jobs ?? {})) {
+    if (!job || typeof job !== "object") continue;
+    /* Both `container: node:20` and `container: { image: node:20 }`. */
+    const add = (value) => {
+      if (typeof value === "string") images.push(value);
+      else if (value && typeof value === "object" && typeof value.image === "string") {
+        images.push(value.image);
+      }
+    };
+    add(job.container);
+    for (const service of Object.values(job.services ?? {})) add(service);
+  }
+  return images;
 }
 
 /* Refs an actor picks: a pull request's head, a commenter's issue number, a
