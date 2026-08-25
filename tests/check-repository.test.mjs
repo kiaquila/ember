@@ -282,6 +282,22 @@ test("a write-capable workflow may not name an actor-controlled ref", () => {
   ].join("\n");
   assert.match(checkWorkflow("input.yml", otherInput).join("\n"), /names an actor-controlled ref/);
 
+  /* A reusable-workflow job passes its inputs at `job.with`, beside `uses`,
+     with no steps of its own. */
+  const reusable = [
+    "on:",
+    "  issue_comment:",
+    "    types: [created]",
+    "permissions:",
+    "  contents: write",
+    "jobs:",
+    "  build:",
+    `    uses: owner/repo/.github/workflows/build.yml@${"a".repeat(40)}`,
+    "    with:",
+    "      ref: refs/pull/${{ github.event.issue.number }}/head"
+  ].join("\n");
+  assert.match(checkWorkflow("reusable.yml", reusable).join("\n"), /names an actor-controlled ref/);
+
   /* An `if:` condition routes the job without fetching anything, which is
      how the review-rerun workflow legitimately tests `github.event.comment`. */
   const routing = [

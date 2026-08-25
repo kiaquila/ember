@@ -287,6 +287,8 @@ function executionInfluencingValues(workflow) {
   for (const job of Object.values(workflow.jobs ?? {})) {
     if (!job || typeof job !== "object") continue;
     collect(job.env);
+    /* A reusable-workflow job takes its inputs here rather than in steps. */
+    collect(job.with);
     if (typeof job.defaults?.run?.["working-directory"] === "string") {
       values.push(job.defaults.run["working-directory"]);
     }
