@@ -1,424 +1,245 @@
+/* The Codex Review gate's rules. The gate itself only fetches and loops; the
+   decisions live in the helpers, so they are exercised here directly. */
+
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 
-const repositoryRoot = resolve(
-  process.env.WEB_DESIGN_REPOSITORY_ROOT || resolve(import.meta.dirname, "..")
-);
-const helpers = await import(pathToFileURL(
-  resolve(repositoryRoot, "scripts/codex-review-helpers.mjs")
-).href);
-const rerun = await import(pathToFileURL(
-  resolve(repositoryRoot, "scripts/codex-review-rerun.mjs")
-).href);
-const publisher = await import(pathToFileURL(
-  resolve(repositoryRoot, "scripts/publish-codex-review-check.mjs")
-).href);
-
-const {
+import {
   classifyCodexNativeReview,
-  createCodexReviewRequestMarkerBody,
-  extractCodexReviewRequestMarker,
   isAcceptableCodexSummaryComment,
   isCodexReviewCommand,
   isCodexReviewCommandForHead,
   isStrictlyAfterCodexReviewRequest,
   isTrustedAssociation,
   latestCodexNativeReviewResult,
-  latestCodexReviewRequestMarker,
   latestTrustedCodexReviewCommand
-} = helpers;
-const {
+} from "../scripts/codex-review-helpers.mjs";
+import {
   rerunCodexReviewForHead,
   selectCodexReviewRun,
   shouldRouteCodexReviewRerunEvent
-} = rerun;
-const { checkRunPayload, publishCodexReviewCheck } = publisher;
+} from "../scripts/codex-review-rerun.mjs";
 
-const headSha = "abc123def456";
+const headSha = "abcdef0123456789abcdef0123456789abcdef01";
 const codexUser = { login: "chatgpt-codex-connector[bot]" };
 
-function markerBody() {
-  return createCodexReviewRequestMarkerBody({
-    headSha,
-    requestId: "10-abc123def456",
-    sourceCommentId: "10",
-    sourceCommentCreatedAt: "2026-08-05T12:00:00Z",
-    requestedAt: "2026-08-05T12:00:00Z"
-  });
-}
-
-test("trusted request associations and the Codex command are explicit", () => {
-  const commandHeadSha = "abcdef0123456789abcdef0123456789abcdef01";
+test("only trusted humans naming the exact head can request a review", () => {
   assert.equal(isTrustedAssociation("OWNER"), true);
   assert.equal(isTrustedAssociation("MEMBER"), true);
   assert.equal(isTrustedAssociation("COLLABORATOR"), true);
   assert.equal(isTrustedAssociation("CONTRIBUTOR"), false);
+
   assert.equal(isCodexReviewCommand("@codex review"), true);
   assert.equal(isCodexReviewCommand("please @CoDeX   review this"), true);
   assert.equal(isCodexReviewCommand("@codex implement"), false);
-  assert.equal(isCodexReviewCommandForHead(`@codex review ${commandHeadSha}`, commandHeadSha), true);
-  assert.equal(isCodexReviewCommandForHead(`@codex review ${commandHeadSha}`, "b".repeat(40)), false);
-  assert.equal(isCodexReviewCommandForHead("@codex review", commandHeadSha), false);
-});
 
-test("request markers bind a GitHub Actions comment to the current head", () => {
-  assert.deepEqual(extractCodexReviewRequestMarker(markerBody()), {
-    requestId: "10-abc123def456",
-    sha: headSha,
-    sourceCommentId: "10",
-    sourceCommentCreatedAt: "2026-08-05T12:00:00Z",
-    requestedAt: "2026-08-05T12:00:00Z"
-  });
-
-  const trusted = {
-    id: 11,
-    body: markerBody(),
-    created_at: "2026-08-05T12:00:01Z",
-    user: { login: "github-actions[bot]" }
-  };
-  assert.equal(latestCodexReviewRequestMarker([trusted], headSha)?.requestId, "10-abc123def456");
+  assert.equal(isCodexReviewCommandForHead(`@codex review ${headSha}`, headSha), true);
+  assert.equal(isCodexReviewCommandForHead(`@codex review \`${headSha}\``, headSha), true);
+  /* A bare command, or one naming another commit, vouches for nothing. */
+  assert.equal(isCodexReviewCommandForHead("@codex review", headSha), false);
+  assert.equal(isCodexReviewCommandForHead(`@codex review ${headSha.slice(0, 12)}`, headSha), false);
   assert.equal(
-    latestCodexReviewRequestMarker([{ ...trusted, user: { login: "repo-owner" } }], headSha),
-    null,
-    "a user-authored forged marker must not be accepted"
-  );
-  assert.equal(latestCodexReviewRequestMarker([trusted], "new-head"), null);
-  const olderRequestPublishedLater = {
-    ...trusted,
-    body: createCodexReviewRequestMarkerBody({
-      headSha,
-      requestId: "20-abc123def456",
-      sourceCommentId: "20",
-      sourceCommentCreatedAt: "2026-08-05T12:00:00Z",
-      requestedAt: "2026-08-05T12:00:00Z"
-    }),
-    created_at: "2026-08-05T12:00:02Z"
-  };
-  const laterRequestPublishedFirst = {
-    ...trusted,
-    body: createCodexReviewRequestMarkerBody({
-      headSha,
-      requestId: "21-abc123def456",
-      sourceCommentId: "21",
-      sourceCommentCreatedAt: "2026-08-05T12:00:01Z",
-      requestedAt: "2026-08-05T12:00:01Z"
-    }),
-    created_at: "2026-08-05T12:00:01Z"
-  };
-  assert.equal(
-    latestCodexReviewRequestMarker([olderRequestPublishedLater, laterRequestPublishedFirst], headSha)?.sourceCommentId,
-    "21",
-    "markers are ordered by their source request, not delayed marker publication"
-  );
-});
-
-test("the installation PR can bind directly to a trusted request comment", () => {
-  const installationHeadSha = "abcdef0123456789abcdef0123456789abcdef01";
-  const command = {
-    id: 12,
-    body: `@codex review ${installationHeadSha}`,
-    created_at: "2026-08-05T12:00:00Z",
-    author_association: "OWNER",
-    user: { login: "repo-owner", type: "User" }
-  };
-  assert.equal(
-    latestTrustedCodexReviewCommand([command], [], installationHeadSha)?.bootstrap,
-    true
-  );
-  assert.equal(
-    latestTrustedCodexReviewCommand(
-      [command],
-      [{ event: "committed", created_at: "2026-08-05T12:01:00Z" }],
-      "new-head"
-    ),
-    null,
-    "a later head update changes the required command SHA"
-  );
-  assert.equal(
-    latestTrustedCodexReviewCommand(
-      [{ ...command, author_association: "CONTRIBUTOR" }],
-      [],
-      installationHeadSha
-    ),
-    null
-  );
-});
-
-test("native Codex reviews are current-head and P0-P2 blocking", () => {
-  const review = {
-    id: 20,
-    commit_id: headSha,
-    state: "COMMENTED",
-    submitted_at: "2026-08-05T12:01:00Z",
-    user: codexUser
-  };
-
-  assert.equal(classifyCodexNativeReview(review, [], headSha), "pass");
-  assert.equal(classifyCodexNativeReview(review, [{
-    pull_request_review_id: 20,
-    body: "![P3 Badge] Advisory note",
-    user: codexUser
-  }], headSha), "pass");
-  assert.equal(classifyCodexNativeReview(review, [{
-    pull_request_review_id: 20,
-    body: "![P2 Badge] Blocking issue",
-    user: codexUser
-  }], headSha), "fail");
-  assert.equal(classifyCodexNativeReview({
-    ...review,
-    state: "APPROVED"
-  }, [{
-    pull_request_review_id: 20,
-    body: "![P2 Badge] Blocking issue",
-    user: codexUser
-  }], headSha), "fail", "approved reviews must still inspect inline findings");
-  assert.equal(classifyCodexNativeReview(review, [{
-    pull_request_review_id: 20,
-    body: "Unclassified finding",
-    user: codexUser
-  }], headSha), "fail");
-  assert.equal(classifyCodexNativeReview(review, [], "new-head"), null);
-  assert.equal(
-    classifyCodexNativeReview({ ...review, user: { login: "fake-codex[bot]" } }, [], headSha),
-    null
-  );
-});
-
-test("manual trusted validation publishes a head-bound check result", async () => {
-  const requests = [];
-  const request = async (url, options) => {
-    requests.push({ url, options });
-    return { ok: true, json: async () => ({ id: 1 }) };
-  };
-  await publishCodexReviewCheck({
-    token: "token",
-    repository: "owner/repo",
-    headSha: "a".repeat(40),
-    conclusion: "success",
-    detailsUrl: "https://github.com/owner/repo/actions/runs/1",
-    request
-  });
-  assert.equal(requests.length, 1);
-  assert.equal(requests[0].url, "https://api.github.com/repos/owner/repo/check-runs");
-  assert.equal(requests[0].options.method, "POST");
-  assert.deepEqual(JSON.parse(requests[0].options.body), {
-    name: "Codex Review",
-    head_sha: "a".repeat(40),
-    status: "completed",
-    conclusion: "success",
-    details_url: "https://github.com/owner/repo/actions/runs/1",
-    output: {
-      title: "Codex Review passed",
-      summary: `Trusted manual validation passed for ${"a".repeat(40)}.`
-    }
-  });
-  assert.throws(
-    () => checkRunPayload({ headSha: "short", conclusion: "success", detailsUrl: "https://example.com" }),
-    /40-character commit SHA/
-  );
-  assert.throws(
-    () => checkRunPayload({ headSha: "a".repeat(40), conclusion: "neutral", detailsUrl: "https://example.com" }),
-    /success or failure/
-  );
-});
-
-test("native reviews require a strictly later request timestamp", () => {
-  const request = { sourceCommentCreatedAt: "2026-08-05T12:00:00Z" };
-  assert.equal(isStrictlyAfterCodexReviewRequest("2026-08-05T12:00:01Z", request), true);
-  assert.equal(
-    isStrictlyAfterCodexReviewRequest("2026-08-05T12:00:00Z", request),
-    false,
-    "same-second reviews cannot be attributed unambiguously to the latest request"
-  );
-});
-
-test("Codex no-findings summaries must name the reviewed head", () => {
-  const summary = {
-    body: `Codex Review: Didn't find any major issues.\n\n**Reviewed commit:** \`${headSha.slice(0, 10)}\``,
-    created_at: "2026-08-05T12:01:00Z",
-    id: "31",
-    user: codexUser
-  };
-  assert.equal(isAcceptableCodexSummaryComment(summary, headSha), true);
-  assert.equal(
-    isAcceptableCodexSummaryComment(summary, headSha, "2026-08-05T12:00:00Z"),
-    true,
-    "a current-head summary posted after the request is acceptable"
-  );
-  assert.equal(
-    isAcceptableCodexSummaryComment(summary, headSha, "2026-08-05T12:02:00Z"),
-    false,
-    "an older summary cannot satisfy a newer review request"
-  );
-  assert.equal(
-    isAcceptableCodexSummaryComment(summary, headSha, "2026-08-05T12:01:00Z", "30"),
-    true,
-    "a same-second summary posted after the request is acceptable"
-  );
-  assert.equal(
-    isAcceptableCodexSummaryComment(summary, headSha, "2026-08-05T12:01:00Z", "32"),
-    false,
-    "a same-second summary posted before the request is rejected"
-  );
-  assert.equal(isAcceptableCodexSummaryComment({ ...summary, body: "Codex Review: Didn't find any major issues." }, headSha), false);
-  assert.equal(isAcceptableCodexSummaryComment({ ...summary, body: summary.body.replace(headSha.slice(0, 10), "0000000000") }, headSha), false);
-});
-
-test("the latest current-head native Codex result wins", () => {
-  const olderPass = {
-    id: 1,
-    commit_id: headSha,
-    state: "COMMENTED",
-    submitted_at: "2026-08-05T12:01:00Z",
-    user: codexUser
-  };
-  const newerFail = {
-    ...olderPass,
-    id: 2,
-    submitted_at: "2026-08-05T12:02:00Z"
-  };
-  assert.equal(latestCodexNativeReviewResult([olderPass, newerFail], [{
-    pull_request_review_id: 2,
-    body: "P1 regression",
-    user: codexUser
-  }], headSha), "fail");
-  assert.equal(
-    latestCodexNativeReviewResult([
-      { ...olderPass, submitted_at: "2026-08-05T12:03:00Z" },
-      { ...newerFail, submitted_at: "2026-08-05T12:03:00Z" }
-    ], [{
-      pull_request_review_id: 2,
-      body: "P1 regression",
-      user: codexUser
-    }], headSha),
-    "fail",
-    "a higher native review ID wins a same-second tie"
-  );
-});
-
-test("rerun routing accepts only exact trusted Codex evidence", () => {
-  assert.equal(shouldRouteCodexReviewRerunEvent({ review: { user: codexUser } }), true);
-  assert.equal(
-    shouldRouteCodexReviewRerunEvent({
-      issue: { pull_request: {} },
-      comment: { body: "Codex Review: Didn't find any major issues.", user: codexUser }
-    }),
-    true
-  );
-  assert.equal(
-    shouldRouteCodexReviewRerunEvent({ review: { user: { login: "fake-codex[bot]" } } }),
+    isCodexReviewCommandForHead(`@codex review ${"f".repeat(40)}`, headSha),
     false
   );
 });
 
-test("rerun selection is head-bound and waits for active runs before rerunning", () => {
-  const failed = {
-    id: 30,
+test("the newest trusted request for this head is the one that counts", () => {
+  const comments = [
+    {
+      id: 1,
+      body: `@codex review ${headSha}`,
+      author_association: "OWNER",
+      user: { login: "kiaquila", type: "User" },
+      created_at: "2026-08-25T10:00:00Z"
+    },
+    {
+      id: 2,
+      body: `@codex review ${headSha}`,
+      author_association: "OWNER",
+      user: { login: "kiaquila", type: "User" },
+      created_at: "2026-08-25T12:00:00Z"
+    },
+    {
+      id: 3,
+      body: `@codex review ${headSha}`,
+      author_association: "CONTRIBUTOR",
+      user: { login: "outsider", type: "User" },
+      created_at: "2026-08-25T13:00:00Z"
+    },
+    {
+      id: 4,
+      body: `@codex review ${headSha}`,
+      author_association: "OWNER",
+      user: { login: "some-app[bot]", type: "Bot" },
+      created_at: "2026-08-25T14:00:00Z"
+    }
+  ];
+  const request = latestTrustedCodexReviewCommand(comments, headSha);
+  assert.equal(request.commentId, "2");
+  assert.equal(request.requestedAt, "2026-08-25T12:00:00Z");
+
+  /* An untrusted association and a bot cannot stand in for the human. */
+  assert.equal(latestTrustedCodexReviewCommand(comments.slice(2), headSha), null);
+  assert.equal(latestTrustedCodexReviewCommand([], headSha), null);
+});
+
+test("evidence must be strictly newer than the request it answers", () => {
+  const request = { requestedAt: "2026-08-25T12:00:00Z" };
+  assert.equal(isStrictlyAfterCodexReviewRequest("2026-08-25T12:00:01Z", request), true);
+  assert.equal(isStrictlyAfterCodexReviewRequest("2026-08-25T12:00:00Z", request), false);
+  assert.equal(isStrictlyAfterCodexReviewRequest("2026-08-25T11:59:59Z", request), false);
+  assert.equal(isStrictlyAfterCodexReviewRequest(undefined, request), false);
+});
+
+test("a review answers only for its own head, and P0-P2 blocks", () => {
+  const review = { id: 7, commit_id: headSha, user: codexUser, state: "COMMENTED", body: "" };
+
+  assert.equal(classifyCodexNativeReview(review, [], headSha), "pass");
+  assert.equal(classifyCodexNativeReview({ ...review, state: "APPROVED" }, [], headSha), "pass");
+  assert.equal(
+    classifyCodexNativeReview({ ...review, state: "CHANGES_REQUESTED" }, [], headSha),
+    "fail"
+  );
+  assert.equal(classifyCodexNativeReview({ ...review, body: "P1 badge" }, [], headSha), "fail");
+
+  /* Another commit, or another author, is not evidence about this head. */
+  assert.equal(classifyCodexNativeReview({ ...review, commit_id: "other" }, [], headSha), null);
+  assert.equal(
+    classifyCodexNativeReview({ ...review, user: { login: "someone" } }, [], headSha),
+    null
+  );
+
+  const blocking = [{ pull_request_review_id: 7, user: codexUser, body: "P2 finding" }];
+  assert.equal(classifyCodexNativeReview(review, blocking, headSha), "fail");
+  const informational = [{ pull_request_review_id: 7, user: codexUser, body: "P3 nit" }];
+  assert.equal(classifyCodexNativeReview(review, informational, headSha), "pass");
+  /* A finding the gate cannot grade is treated as blocking. */
+  const ungraded = [{ pull_request_review_id: 7, user: codexUser, body: "no priority here" }];
+  assert.equal(classifyCodexNativeReview(review, ungraded, headSha), "fail");
+});
+
+test("the latest current-head result wins", () => {
+  const reviews = [
+    {
+      id: 1,
+      commit_id: headSha,
+      user: codexUser,
+      state: "CHANGES_REQUESTED",
+      submitted_at: "2026-08-25T12:00:00Z"
+    },
+    {
+      id: 2,
+      commit_id: headSha,
+      user: codexUser,
+      state: "APPROVED",
+      submitted_at: "2026-08-25T13:00:00Z"
+    }
+  ];
+  assert.equal(latestCodexNativeReviewResult(reviews, [], headSha), "pass");
+  assert.equal(latestCodexNativeReviewResult(reviews.slice(0, 1), [], headSha), "fail");
+  assert.equal(latestCodexNativeReviewResult([], [], headSha), null);
+});
+
+test("a no-findings summary must name the reviewed head and follow the request", () => {
+  const requestedAt = "2026-08-25T12:00:00Z";
+  const body = [
+    "Codex Review: Didn't find any major issues.",
+    "",
+    `**Reviewed commit:** \`${headSha.slice(0, 10)}\``
+  ].join("\n");
+  const summary = { id: 20, user: codexUser, body, created_at: "2026-08-25T12:30:00Z" };
+
+  assert.equal(isAcceptableCodexSummaryComment(summary, headSha, requestedAt, "10"), true);
+  /* Before the request, from someone else, or about another commit. */
+  assert.equal(
+    isAcceptableCodexSummaryComment(
+      { ...summary, created_at: "2026-08-25T11:00:00Z" },
+      headSha,
+      requestedAt,
+      "10"
+    ),
+    false
+  );
+  assert.equal(
+    isAcceptableCodexSummaryComment({ ...summary, user: { login: "kiaquila" } }, headSha, requestedAt, "10"),
+    false
+  );
+  assert.equal(
+    isAcceptableCodexSummaryComment(summary, "f".repeat(40), requestedAt, "10"),
+    false
+  );
+});
+
+test("rerun routing accepts only Codex's own evidence", () => {
+  assert.equal(shouldRouteCodexReviewRerunEvent({ review: { user: codexUser } }), true);
+  assert.equal(shouldRouteCodexReviewRerunEvent({ review: { user: { login: "kiaquila" } } }), false);
+  assert.equal(
+    shouldRouteCodexReviewRerunEvent({
+      issue: { pull_request: {} },
+      comment: { user: codexUser, body: "Codex Review: Didn't find any major issues." }
+    }),
+    true
+  );
+  assert.equal(
+    shouldRouteCodexReviewRerunEvent({
+      issue: { pull_request: {} },
+      comment: { user: codexUser, body: "unrelated chatter" }
+    }),
+    false
+  );
+  assert.equal(shouldRouteCodexReviewRerunEvent({}), false);
+});
+
+test("rerun selection is head-bound and waits for an active run", () => {
+  const completed = {
+    id: 1,
     event: "pull_request",
     head_sha: headSha,
     status: "completed",
-    conclusion: "failure",
-    created_at: "2026-08-05T12:00:00Z"
+    created_at: "2026-08-25T12:00:00Z"
   };
-  assert.deepEqual(selectCodexReviewRun([failed], headSha), { action: "rerun", run: failed });
-  const succeeded = { ...failed, conclusion: "success" };
+  const active = { ...completed, id: 2, status: "in_progress", created_at: "2026-08-25T13:00:00Z" };
+
+  assert.deepEqual(selectCodexReviewRun([completed], headSha).action, "rerun");
   assert.deepEqual(
-    selectCodexReviewRun([succeeded], headSha),
-    { action: "rerun", run: succeeded },
-    "fresh trusted evidence must re-evaluate a previously successful gate run"
+    selectCodexReviewRun([completed, active], headSha).action,
+    "wait_for_active_then_rerun"
   );
-  const active = {
-    ...failed,
-    id: 31,
-    status: "in_progress",
-    conclusion: null,
-    created_at: "2026-08-05T12:01:00Z"
-  };
+  /* Another commit's run must never be reused as this head's evidence. */
   assert.deepEqual(
-    selectCodexReviewRun([failed, active], headSha),
-    { action: "wait_for_active_then_rerun", run: active }
+    selectCodexReviewRun([{ ...completed, head_sha: "other" }], headSha).action,
+    "not_found"
   );
-  assert.deepEqual(selectCodexReviewRun([failed], "new-head"), {
-    action: "not_found",
-    run: null
-  });
+  assert.deepEqual(selectCodexReviewRun([], headSha).action, "not_found");
 });
 
-test("rerun helper waits for an active gate before rerunning it", async () => {
+test("the rerun helper posts a rerun for the head-bound run", async () => {
   const calls = [];
-  const active = {
-    id: 42,
-    event: "pull_request",
-    head_sha: headSha,
-    status: "in_progress",
-    conclusion: null,
-    created_at: "2026-08-05T12:00:00Z"
-  };
-  let readCount = 0;
-  const request = async (_token, _repository, path, options = {}) => {
-    calls.push({ path, method: options.method || "GET" });
-    if (path.includes("/actions/workflows/codex-review.yml/runs")) {
-      readCount += 1;
-      return {
-        workflow_runs: [readCount === 1 ? active : {
-          ...active,
-          status: "completed",
-          conclusion: "success"
-        }]
-      };
-    }
-    return null;
-  };
-
   const result = await rerunCodexReviewForHead({
-    token: "token",
-    repository: "owner/repo",
+    token: "t",
+    repository: "kiaquila/ember",
     headSha,
-    request,
-    sleep: async () => {}
-  });
-
-  assert.equal(result.action, "rerun");
-  assert.equal(calls.filter(({ method }) => method === "GET").length, 2);
-  assert.deepEqual(calls.at(-1), {
-    path: "/repos/owner/repo/actions/runs/42/rerun",
-    method: "POST"
-  });
-});
-
-test("rerun helper calls the Actions endpoint for a failed head-bound run", async () => {
-  const calls = [];
-  const request = async (_token, _repository, path, options = {}) => {
-    calls.push({ path, method: options.method || "GET" });
-    if (path.includes("/actions/workflows/codex-review.yml/runs")) {
+    request: async (token, repository, path, options = {}) => {
+      calls.push({ path, method: options.method });
+      if (path.includes("/runs/")) return null;
       return {
         workflow_runs: [{
           id: 42,
           event: "pull_request",
           head_sha: headSha,
           status: "completed",
-          conclusion: "failure",
-          created_at: "2026-08-05T12:00:00Z"
+          created_at: "2026-08-25T12:00:00Z"
         }]
       };
-    }
-    return null;
-  };
-
-  const result = await rerunCodexReviewForHead({
-    token: "token",
-    repository: "owner/repo",
-    headSha,
-    request
-  });
-  assert.equal(result.action, "rerun");
-  assert.deepEqual(calls, [
-    {
-      path: `/repos/owner/repo/actions/workflows/codex-review.yml/runs?event=pull_request&head_sha=${headSha}&per_page=100`,
-      method: "GET"
     },
-    { path: "/repos/owner/repo/actions/runs/42/rerun", method: "POST" }
-  ]);
+    sleep: async () => {}
+  });
+
+  assert.equal(result.action, "rerun");
+  assert.match(result.message, /rerun for abcdef0123456789abcdef0123456789abcdef01 from run 42/);
+  assert.deepEqual(calls.at(-1), {
+    path: "/repos/kiaquila/ember/actions/runs/42/rerun",
+    method: "POST"
+  });
 });

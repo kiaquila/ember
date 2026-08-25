@@ -1,10 +1,11 @@
 # Third-party notices
 
-No third-party product asset is included in this baseline. Each project records
-the licenses and permitted use of its own fonts, images, software, and other
-external material here or beside the relevant files.
+The study itself ships no third-party asset: system fonts, canvas 2D and
+synthesized audio only.
 
-Parts of the repository-policy and workflow design were adapted from
+The repository guard and the Codex review gate under `scripts/` were adapted by
+hand from the `kiaquila/web-design` template, whose repository-policy and
+workflow design was in turn adapted from
 [Unicorn Hub](https://github.com/kiaquila/unicorn-hub), retrieved at commit
 `1a3a22a5f800d2a7b221b3f97e41f04d6e4b73cf`.
 

@@ -78,8 +78,8 @@ links. Its dashboard settings live in
 [`docs/stage-hosting.md`](./docs/stage-hosting.md); the deploy itself is run
 by Cloudflare, not by this repository.
 
-**The stage still builds from the old repository.** The Worker's Git connection
-was not moved when this repository was created: it is still `kiaquila/web-design`
+**Cloudflare is not connected to this repository, and nothing here deploys.**
+The Worker's Git connection was not moved when this repository was created: it is still `kiaquila/web-design`
 with root `ember/website`. Both URLs above keep working from that build. The
 cutover, its verification and its rollback are written down in
 [`docs/stage-hosting.md`](./docs/stage-hosting.md) and need the account owner,
@@ -88,21 +88,17 @@ repository must stay in place as the rollback route.
 
 ## Repository baseline
 
-This repository is a standalone consumer of the shared `kiaquila/web-design`
-baseline: the policy scripts, guardrail workflows, regression tests and the
-standards under [`docs/standards/`](./docs/standards/) are managed upstream and
-change only through a reviewed update pull request. The project's own code,
-content, documents and deployment configuration are never touched by that
-updater. The selected profile, the executable checks and the pinned baseline
-are recorded in `.web-design/project.json` and `.web-design/lock.json`.
+The checks in this repository were **borrowed by hand** from the
+`kiaquila/web-design` template — `scripts/check-repository.mjs` and the Codex
+review gate started as copies of that template's own, at commit
+`ea8501fdb90236fcb891e97b15f7a42a62f76ff1`, and were then cut down to what one
+static page actually needs.
 
-The pin is **provisional**. `lock.json` points at commit
-`88ab074ceb17081ddb518fb7e7ca888618bdfe37`, the head of the still-draft
-[kiaquila/web-design#46](https://github.com/kiaquila/web-design/pull/46), whose
-version is the prerelease `0.1.0-dev`. There is no immutable stable release to
-pin yet. Once #46 is merged and the first stable release is tagged, this
-repository has to be synced onto that release's full SHA in its own pull
-request.
+That is the whole relationship. There is no lock file, no release manifest, no
+managed-file list and no updater: nothing here is synced, and nothing upstream
+can change this repository. Taking a later improvement means reading the
+template again and porting the part that is worth porting, in a normal pull
+request. These files are this project's own and may be edited freely.
 
 How this repository was extracted from the monorepository, and the proofs taken
 at the time, are recorded in
@@ -110,10 +106,11 @@ at the time, are recorded in
 
 ## Checks
 
-- `npm run preflight` — the shared baseline's own check: repository policy,
-  managed-file drift and the baseline regression tests.
-- `npm run check --prefix website` — the build plus its tests. This is the
-  check CI runs for the project.
+- `npm --prefix website run check` — the build plus its tests, including the
+  size budget for the four published files. This is the project's real check.
+- `npm run check` — the repository guard: tracked generated output, committed
+  secrets, symbolic links, and workflow permissions and action pinning.
+- `npm test` — the guard's own tests and the Codex review gate's rules.
 - `npm --prefix website run dev` — build and serve `dist/` on port 4660.
 - Verify by hand: hover ignition and recovery, the full Play cycle (burn →
   gone → reassemble → loop), Stop, mute, the footer link, the favicon in light

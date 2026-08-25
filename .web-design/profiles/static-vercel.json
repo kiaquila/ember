@@ -1,9 +1,0 @@
-{
-  "id": "static-vercel",
-  "description": "Static frontend deployed through Vercel Git integration.",
-  "deploymentProvider": "vercel",
-  "requirements": [
-    "Use pull-request previews",
-    "Deploy production only from main"
-  ]
-}

@@ -23,25 +23,43 @@ jobs:
         with:
           node-version: "22.18.0"
 
-      - name: Install npm dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          declare -A installed=()
-          while IFS= read -r -d '' lockfile; do
-            directory="$(dirname "$lockfile")"
-            if [ -n "${installed[$directory]:-}" ]; then
-              continue
-            fi
-            installed["$directory"]=1
-            npm ci --prefix "$directory"
-          done < <(
-            find . -type f \
-              \( -name package-lock.json -o -name npm-shrinkwrap.json \) \
-              -not -path './.git/*' \
-              -not -path '*/node_modules/*' \
-              -print0
-          )
+      # website/ is the only package with dependencies; the repository root
+      # has none, so there is nothing to install for the guard or its tests.
+      - name: Install website dependencies
+        run: npm ci --prefix website
 
-      - name: Run project checks
-        run: node scripts/run-project-checks.mjs
+      # Builds dist/, runs the site tests, and with them the size budget.
+      - name: Build and test the website
+        run: npm --prefix website run check
+
+      - name: Test the repository harness
+        run: npm test
+
+  repository-guard:
+    name: repository-guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.18.0"
+
+      - name: Run the repository guard
+        run: npm run check
+
+  osv-scan:
+    name: osv-scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Scan dependencies
+        uses: google/osv-scanner-action/osv-scanner-action@8deb546fdb875b9996d27d4950be7312dac076a1 # v2.5.0
+        with:
+          scan-args: |-
+            --recursive
+            .

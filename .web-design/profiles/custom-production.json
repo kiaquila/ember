@@ -1,9 +1,0 @@
-{
-  "id": "custom-production",
-  "description": "Project-owned production deployment with shared safety checks only.",
-  "deploymentProvider": "custom",
-  "requirements": [
-    "Document verification and rollback",
-    "Use environment-scoped secrets and least-privilege workflow permissions"
-  ]
-}

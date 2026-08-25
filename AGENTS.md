@@ -3,17 +3,13 @@
 Project-specific notes for the Ember study. Read [`README.md`](./README.md)
 first for the traced motion references and the client decisions.
 
-## Shared standards
+## Repository checks
 
-This repository consumes the `kiaquila/web-design` baseline. Follow every
-document under [`docs/standards/`](./docs/standards/); the runbooks under
-[`docs/operations/`](./docs/operations/) describe bootstrap, updates, GitHub
-settings and handoff. Those files are upstream-managed and change only through
-a reviewed update pull request — do not edit them here. The project's profile
-and its executable checks are recorded in `.web-design/project.json`.
-
-The rules below are this project's own and may tighten, never weaken, the
-shared standards.
+The checks under `scripts/` and `.github/workflows/` were borrowed by hand from
+the `kiaquila/web-design` template and trimmed to this project. They are this
+repository's own files — edit them here when they are wrong. Nothing is synced
+from upstream, so do not add lock files, manifests or an updater; see the
+**Repository baseline** section of [`README.md`](./README.md).
 
 ## Project rules
 
@@ -40,10 +36,10 @@ shared standards.
   Policy allows inline script and style because the page is one file by
   design; that allowance is safe only while the build check keeps the page
   free of off-origin references, so do not weaken that check. The Worker still
-  builds from `kiaquila/web-design` at root `ember/website`: its Git connection
-  was not moved when this repository was created, so until the documented
-  cutover runs, `main` here deploys nothing and the old path stays in place as
-  the rollback route.
+  builds from `kiaquila/web-design` at root `ember/website`: the Cloudflare
+  integration for this repository is off and its Git connection was not moved,
+  so `main` here deploys nothing and the old path stays in place as the
+  rollback route until the documented cutover is run by the account owner.
 - The motion concept is traced in [`README.md`](./README.md). Do not copy
   assets or code from the referenced Pinterest pin or reactive-dots site;
   only the documented motion idea is reproduced.
@@ -62,5 +58,6 @@ shared standards.
 - Audio must remain gesture-gated (autoplay policy) and fully silenced by
   mute; keep `prefers-reduced-motion` support working.
 - Before pushing: exercise hover, the full play cycle, stop, mute, and a
-  narrow viewport; run `npm run preflight` and `npm run check --prefix website`.
+  narrow viewport; run `npm --prefix website run check`, `npm run check` and
+  `npm test`.
   Sound needs a real gesture — a scripted `click()` grants no user activation.

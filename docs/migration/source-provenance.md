@@ -80,14 +80,15 @@ The proof is the same tree object as above, and, for that one file, the blob:
 - **Monorepository-only infrastructure.** `.repo-guard.json`, the multi-project
   `ci.yml`, the shared `docs/stage-hosting.md`, the Cloudflare
   stage-registration workflow and script, and the KS production-deploy workflow
-  describe a workspace that no longer exists here; the `web-design` baseline
-  replaces them, and this project's own stage settings now live in
-  `docs/stage-hosting.md` at this root.
+  describe a workspace that no longer exists here; a single CI workflow and a
+  small repository guard replace them, and this project's own stage settings
+  now live in `docs/stage-hosting.md` at this root.
 - **Generated output.** `website/dist/` was never tracked upstream and is not
   tracked here; `npm run build` reproduces it from `website/src/`.
 - **Third-party notices for other projects.** `third-party-notices.md` keeps
-  only the baseline's own notice. This study ships no third-party font, image,
-  script or style: it is system fonts, canvas 2D and synthesized audio.
+  only the notice for the borrowed check design. This study ships no
+  third-party font, image, script or style: it is system fonts, canvas 2D and
+  synthesized audio.
 
 ## Commit map
 
@@ -115,22 +116,19 @@ dot value `#e8a038` and the `https://ks-design.art` footer credit are all as
 they were.
 
 - `README.md` and `AGENTS.md`: `npm --prefix ember/website run check|dev` lost
-  the directory prefix, and `node scripts/check-repository.mjs` became
-  `npm run preflight`, which is the baseline's own repository check.
-- `AGENTS.md` gained a short **Shared standards** section pointing at
-  `docs/standards/` and `.web-design/project.json`, because the baseline's own
-  `AGENTS.md` — which normally carries that pointer — was not installed over the
-  project's approved instructions. Its opening line no longer defers to a root
-  `AGENTS.md`: this file is now the root one.
+  the directory prefix.
+- `AGENTS.md` gained a short **Repository checks** section recording that the
+  guard and the review gate were borrowed by hand and belong to this project.
+  Its opening line no longer defers to a root `AGENTS.md`: this file is now the
+  root one.
 - The stage sections of both documents point at this repository's own
   [`../stage-hosting.md`](../stage-hosting.md) instead of the monorepository's,
-  and both now say plainly that the Worker has not been moved yet. The
-  `static-cloudflare` profile keeps Worker names, domains and account
-  identifiers project-owned, so they belong here rather than in the baseline.
-- `README.md` gained a **Repository baseline** section recording the provisional
-  pin and pointing at this document.
-- `CLAUDE.md` and the root `package.json` came from the baseline and were named
-  for this project.
+  and both now say plainly that the Worker has not been moved yet and that the
+  Cloudflare integration for this repository is off. Worker names, domains and
+  account identifiers are project-owned, so they belong here.
+- `README.md` gained a **Repository baseline** section recording the manual
+  borrowing and pointing at this document.
+- `CLAUDE.md` and the root `package.json` were written for this project.
 - `website/` was not touched at all: no source file, script, asset, test or
   `wrangler.json` value differs from the source commit. The single
   dependency-free page, the four-file build and its off-origin check, the seeded
@@ -138,35 +136,26 @@ they were.
   the reduced-motion handling, the favicons and the Worker's inline-source CSP
   exception all carry over unchanged.
 
-## Baseline pin — provisional
+## Repository checks — borrowed by hand
 
-`.web-design/lock.json` pins
-`88ab074ceb17081ddb518fb7e7ca888618bdfe37` from the
-`codex/web-design-template-v2` branch of `kiaquila/web-design`, at version
-`0.1.0-dev`.
+The checks in this repository were copied from the `kiaquila/web-design`
+template at commit `ea8501fdb90236fcb891e97b15f7a42a62f76ff1` and then reduced
+to what this project needs: `scripts/check-repository.mjs` keeps the tracked-file,
+secret, symlink and workflow rules and drops the policy engine around them, and
+the Codex review gate keeps its trust model and drops the marker comment and the
+second dispatching workflow.
 
-**This is deliberately a provisional pin.** `kiaquila/web-design` has not yet
-published an immutable stable release, because the pull request that turns it
-into a template — [`kiaquila/web-design#46`](https://github.com/kiaquila/web-design/pull/46)
-— is still a draft and must not be merged until every project has been migrated
-and verified. `88ab074c` is the exact, reachable commit that pull request
-proposes, so it is a real 40-character SHA that `baseline-source-verification`
-can download and compare, and the standard `npm run setup` adoption path
-accepted it without any workaround.
+**This is a one-time manual borrowing, not an installation.** No lock file,
+release manifest, managed-file list, profile or updater is present, and the
+template cannot change this repository. A later improvement is taken by reading
+the template again and porting it in a normal pull request. The copied files are
+this project's own.
 
-### Required follow-up
-
-After `kiaquila/web-design#46` is merged and the first immutable stable release
-is published, this project must be moved onto that release's full commit SHA in
-its own separate pull request:
-
-```bash
-npm run sync:web-design -- plan  --source-ref <stable-release-sha> --version <x.y.z>
-npm run sync:web-design -- apply --source-ref <stable-release-sha> --version <x.y.z>
-```
-
-Until that pull request is merged, this repository is pinned to a prerelease
-baseline and `0.1.0-dev` must not be treated as a released version.
+The template's default budgets were deliberately not carried over: its `.png`
+allowance is a 512 KiB per-extension total, which the 1200×630 social card
+exceeds by design. The four published files are budgeted individually in
+`website/tests/site.test.mjs` from their measured sizes instead, and `og.png`
+keeps the 1 MiB limit this project already had.
 
 ## Cloudflare — prepared, not switched
 

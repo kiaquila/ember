@@ -52,11 +52,17 @@ absolute URLs are the only ones the build allows, and only as the complete
 another domain would therefore be a code change here, not just a dashboard
 change.
 
-## Current connection — not yet moved
+## Current connection — Cloudflare integration off
 
-The Worker was created while this project lived in the `kiaquila/web-design`
+**This repository has no Cloudflare integration and deploys nothing.** The
+Worker was created while the project lived in the `kiaquila/web-design`
 monorepository and **still builds from that repository**. Nothing in Cloudflare
-has been changed by this migration.
+has been changed by this migration, and connecting it is out of scope here: the
+cutover below is an account-owner action, to be run deliberately and separately.
+
+The `stage:deploy` and `stage:preview` scripts in `website/package.json` are
+what Cloudflare runs on its own builders once connected. No workflow in this
+repository calls them, and no Cloudflare credential is stored in GitHub.
 
 | Setting | Value in Cloudflare today |
 | --- | --- |

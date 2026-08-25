@@ -1,11 +1,18 @@
 #!/usr/bin/env node
+/* The Codex Review gate.
+
+   It does not run a review; it reads the pull request and decides whether a
+   Codex review for *this exact head* exists and came back clean. The chain is
+   deliberately short: a trusted human comments "@codex review <full head
+   sha>", Codex answers, and this gate reads that answer. There is no marker
+   comment and no second dispatching workflow — the human comment is the
+   record, and rerunning this run is what re-reads it. */
 
 import { appendFileSync } from "node:fs";
 import {
   isAcceptableCodexSummaryComment,
   isStrictlyAfterCodexReviewRequest,
   latestCodexNativeReviewResult,
-  latestCodexReviewRequestMarker,
   latestTrustedCodexReviewCommand
 } from "./codex-review-helpers.mjs";
 
@@ -16,8 +23,6 @@ const eventHeadSha = process.env.CODEX_REVIEW_HEAD_SHA;
 const maxWaitMs = Number(process.env.CODEX_REVIEW_WAIT_MS || 30000);
 const pollMs = Number(process.env.CODEX_REVIEW_POLL_MS || 5000);
 const debounceMs = Number(process.env.CODEX_REVIEW_DEBOUNCE_MS || 5000);
-const bootstrap = process.env.CODEX_REVIEW_BOOTSTRAP === "true";
-const requireHeadMatch = process.env.CODEX_REVIEW_REQUIRE_HEAD_MATCH === "true";
 
 if (!token || !repository || !prNumber) {
   console.error("GITHUB_TOKEN, GITHUB_REPOSITORY, and CODEX_REVIEW_PR_NUMBER are required.");
@@ -50,9 +55,7 @@ async function listPaginated(path) {
   }
 }
 
-async function fetchPull() {
-  return request(`/repos/${owner}/${repo}/pulls/${prNumber}`);
-}
+const fetchPull = () => request(`/repos/${owner}/${repo}/pulls/${prNumber}`);
 
 const initialPull = await fetchPull();
 const headSha = eventHeadSha || initialPull.head?.sha;
@@ -66,46 +69,37 @@ async function fetchEvidence() {
   if (!await currentHeadMatches()) return "stale";
 
   const comments = await listPaginated(`/repos/${owner}/${repo}/issues/${prNumber}/comments`);
-  let timeline = null;
-  let requestMarker = latestCodexReviewRequestMarker(comments, headSha);
-  if (!requestMarker && bootstrap) {
-    timeline = await listPaginated(`/repos/${owner}/${repo}/issues/${prNumber}/timeline`);
-    requestMarker = latestTrustedCodexReviewCommand(comments, timeline, headSha);
-  }
-  if (!requestMarker) return "missing_marker";
+  const reviewRequest = latestTrustedCodexReviewCommand(comments, headSha);
+  if (!reviewRequest) return "missing_request";
 
   const [reviews, reviewComments] = await Promise.all([
     listPaginated(`/repos/${owner}/${repo}/pulls/${prNumber}/reviews`),
     listPaginated(`/repos/${owner}/${repo}/pulls/${prNumber}/comments`)
   ]);
+  /* Only evidence produced after the request counts: an older review looked
+     at an older tree even when the SHA happens to match again. */
   const reviewsAfterRequest = reviews.filter((review) =>
-    isStrictlyAfterCodexReviewRequest(review.submitted_at, requestMarker)
+    isStrictlyAfterCodexReviewRequest(review.submitted_at, reviewRequest)
   );
-  const nativeResult = latestCodexNativeReviewResult(
-    reviewsAfterRequest,
-    reviewComments,
-    headSha
-  );
+  const nativeResult = latestCodexNativeReviewResult(reviewsAfterRequest, reviewComments, headSha);
   if (nativeResult) return nativeResult;
 
   return comments.some((comment) => isAcceptableCodexSummaryComment(
     comment,
     headSha,
-    requestMarker.sourceCommentCreatedAt || requestMarker.requestedAt || requestMarker.commentCreatedAt,
-    requestMarker.sourceCommentId
+    reviewRequest.requestedAt,
+    reviewRequest.commentId
   ))
     ? "pass"
     : "pending";
 }
 
+/* A push and its review request arrive within moments of each other; the
+   debounce keeps this run from reading the pull request mid-update. */
 if (Number.isFinite(debounceMs) && debounceMs > 0) {
   await new Promise((resolve) => setTimeout(resolve, debounceMs));
 }
 if (!await currentHeadMatches()) {
-  if (requireHeadMatch) {
-    console.error(`Codex Review failed: selected ref ${headSha} is not the current head of PR #${prNumber}.`);
-    process.exit(1);
-  }
   console.log(`Codex Review skipped stale run for ${headSha}; PR head changed during debounce.`);
   process.exit(0);
 }
@@ -137,7 +131,7 @@ if (outcome === "pass") {
   process.exit(0);
 }
 
-const next = outcome === "missing_marker"
+const next = outcome === "missing_request"
   ? "A trusted OWNER, MEMBER, or COLLABORATOR must post '@codex review <current-full-head-sha>' on this PR."
   : outcome === "fail"
     ? "Resolve all P0-P2 findings, push fixes if needed, and request a new current-head review."

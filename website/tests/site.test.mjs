@@ -30,6 +30,39 @@ test("the study ships as one page, its two favicons and the social card", async 
   }
 });
 
+/* What the build publishes, and the most each file may weigh.
+
+   Four files ship, so they are simply listed: a configurable budget system
+   would be more machinery than the thing it measures. The limits are round
+   numbers a little above what the build actually produces — measured from
+   `npm --prefix website run check` on 2026-08-25 — so ordinary edits pass
+   and a runaway does not:
+
+     index.html            35,097 B  ->  40 KiB  (~17% headroom)
+     favicon-32.png         1,236 B  ->   2 KiB  (nearest KiB step up)
+     apple-touch-icon.png   7,078 B  ->   8 KiB  (~16% headroom)
+     og.png               901,218 B  ->   1 MiB  (~16% headroom)
+
+   og.png keeps the 1 MiB limit it has always had: the film grain is most of
+   that file (client-approved pixels), and the deterministic in-script deflate
+   trades ~25% size against zlib level 9 for byte-stable output.
+
+   A file that outgrows its budget is a decision, not an accident — raise the
+   number here deliberately, with the new measurement. */
+const BUDGETS = {
+  "index.html": 40 * 1024,
+  "favicon-32.png": 2 * 1024,
+  "apple-touch-icon.png": 8 * 1024,
+  "og.png": 1024 * 1024
+};
+
+test("the four published files stay inside their size budgets", async () => {
+  for (const [name, budget] of Object.entries(BUDGETS)) {
+    const { size } = await stat(join(dist, name));
+    assert.ok(size <= budget, `${name} is ${size} bytes, budget ${budget}`);
+  }
+});
+
 test("nothing is loaded from another origin", () => {
   /* No fonts, no analytics, no CDN: a network dependency would also break the
      Content-Security-Policy the Worker sets. */
@@ -62,11 +95,7 @@ test("the social card is declared and matches what ships", async () => {
   assert.equal(card.toString("ascii", 12, 16), "IHDR");
   assert.equal(card.readUInt32BE(16), 1200, "og.png width disagrees with the tags");
   assert.equal(card.readUInt32BE(20), 630, "og.png height disagrees with the tags");
-  /* ~880 KB today: the film grain is most of the file (client-approved
-     pixels), and the deterministic in-script deflate trades ~25% size
-     against zlib level 9 for byte-stable output. The budget only catches
-     runaway. */
-  assert.ok(card.length <= 1024 * 1024, `og.png is ${card.length} bytes, budget 1 MB`);
+  /* Its size is budgeted with the rest of the build, below. */
   /* No off-origin leak through the allowance: an absolute URL in a meta tag
      must be one of the two published own-origin URLs, exactly. */
   const allowed = new Set([
