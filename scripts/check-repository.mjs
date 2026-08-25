@@ -125,11 +125,15 @@ function triggerNames(on) {
   return on && typeof on === "object" ? Object.keys(on) : [];
 }
 
-/** True when `push:` names branch filters and every one is the trusted branch. */
+/** True when `push:` can only ever fire for the trusted branch. */
 function pushRestrictedToDefaultBranch(on) {
   const push = on && typeof on === "object" && !Array.isArray(on) ? on.push : null;
   /* `on: push` and `push:` with no filter run for every branch. */
   if (!push || typeof push !== "object") return false;
+  /* A `branches` filter alone means tag pushes do not fire the workflow —
+     but naming any tag filter turns them back on, and a tag push runs the
+     tagged commit's copy, which is a branch-controlled ref again. */
+  if ("tags" in push || "tags-ignore" in push) return false;
   /* `branches-ignore` is an exclusion, so it never proves a restriction. */
   const branches = push.branches;
   const listed = Array.isArray(branches) ? branches : typeof branches === "string" ? [branches] : [];
@@ -215,9 +219,17 @@ export function checkWorkflow(name, text) {
   }
 
   /* A tag or branch reference is mutable, so a compromised action would run
-     here on the next push without any change landing in this repository. */
+     here on the next push without any change landing in this repository. A
+     local action is this repository's own code and is already reviewed. */
   for (const action of actionReferences(workflow)) {
-    if (action.startsWith("./") || action.startsWith("docker://")) continue;
+    if (action.startsWith("./")) continue;
+    /* A container action is immutable only at a digest; `:latest` is not. */
+    if (action.startsWith("docker://")) {
+      if (!/@sha256:[a-f0-9]{64}$/.test(action)) {
+        failures.push(`Container action is not pinned to a digest in ${name}: ${action}`);
+      }
+      continue;
+    }
     const ref = action.slice(action.lastIndexOf("@") + 1);
     if (!/^[a-f0-9]{40}$/.test(ref)) {
       failures.push(`Action is not pinned to a full SHA in ${name}: ${action}`);

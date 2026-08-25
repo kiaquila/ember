@@ -129,8 +129,10 @@ they were.
 - `README.md` gained a **Repository baseline** section recording the manual
   borrowing and pointing at this document.
 - `CLAUDE.md` and the root `package.json` were written for this project.
-- `website/` was not touched at all: no source file, script, asset, test or
-  `wrangler.json` value differs from the source commit. The single
+- `website/` carries exactly one adaptation, in `website/tests/site.test.mjs`:
+  a test asserting the size budget for the four published files, which also
+  now holds `og.png`'s pre-existing 1 MiB limit. No source file, script, asset
+  or `wrangler.json` value differs from the source commit. The single
   dependency-free page, the four-file build and its off-origin check, the seeded
   `og.png` with its geometry fingerprint, the gesture-gated Web Audio synthesis,
   the reduced-motion handling, the favicons and the Worker's inline-source CSP

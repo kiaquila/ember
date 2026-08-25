@@ -189,6 +189,28 @@ test("push counts as branch-controlled unless it is pinned to the trusted branch
   assert.deepEqual(checkWorkflow("pinned.yml", pinned), []);
   const pinnedInline = ["on:", "  push:", "    branches: [main]", write].join("\n");
   assert.deepEqual(checkWorkflow("pinned-inline.yml", pinnedInline), []);
+
+  /* A `branches` filter alone keeps tag pushes from firing at all, but naming
+     any tag filter turns them back on — and a tag push runs the tagged
+     commit's copy, which anyone able to push a tag controls. */
+  const tagged = ["on:", "  push:", "    branches: [main]", "    tags: ['*']", write].join("\n");
+  assert.match(checkWorkflow("tagged.yml", tagged).join("\n"), /branch-controlled trigger \(push\)/);
+  const tagIgnore = ["on:", "  push:", "    branches: [main]", "    tags-ignore: [v0]", write].join("\n");
+  assert.match(checkWorkflow("tag-ignore.yml", tagIgnore).join("\n"), /branch-controlled trigger \(push\)/);
+});
+
+test("container actions must name an immutable digest", () => {
+  const step = (uses) =>
+    ["on:", "  pull_request:", "permissions: {}", "jobs:", "  a:", "    steps:", `      - uses: ${uses}`].join("\n");
+
+  /* `:latest` is exactly as mutable as an action branch reference. */
+  assert.match(
+    checkWorkflow("docker.yml", step("docker://owner/image:latest")).join("\n"),
+    /Container action is not pinned to a digest in docker\.yml/
+  );
+  assert.deepEqual(checkWorkflow("digest.yml", step(`docker://owner/image@sha256:${"a".repeat(64)}`)), []);
+  /* A local action is this repository's own reviewed code. */
+  assert.deepEqual(checkWorkflow("local.yml", step("./.github/actions/x")), []);
 });
 
 test("YAML spellings a line reader would miss are still read", () => {
