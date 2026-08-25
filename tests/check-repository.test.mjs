@@ -282,6 +282,27 @@ test("a write-capable workflow may not name an actor-controlled ref", () => {
   ].join("\n");
   assert.match(checkWorkflow("input.yml", otherInput).join("\n"), /names an actor-controlled ref/);
 
+  /* A matrix value reaches the checkout the same way an env value does. The
+     collector walks the job rather than naming the places a ref can sit, so
+     `strategy.matrix` needed no rule of its own. */
+  const matrix = [
+    "on:",
+    "  issue_comment:",
+    "    types: [created]",
+    "permissions:",
+    "  contents: write",
+    "jobs:",
+    "  a:",
+    "    strategy:",
+    "      matrix:",
+    "        ref: [refs/pull/1/head]",
+    "    steps:",
+    `      - uses: ${pinned}`,
+    "        with:",
+    "          ref: ${{ matrix.ref }}"
+  ].join("\n");
+  assert.match(checkWorkflow("matrix.yml", matrix).join("\n"), /names an actor-controlled ref/);
+
   /* A reusable-workflow job passes its inputs at `job.with`, beside `uses`,
      with no steps of its own. */
   const reusable = [

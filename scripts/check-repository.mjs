@@ -295,46 +295,30 @@ const ACTOR_CONTROLLED_REF = [
   /github\.event\.(?:issue|comment|pull_request|client_payload|workflow_run)\b/
 ];
 
-/** Every string that can decide what a job checks out or executes.
+/* Keys whose value cannot cause anything to be fetched or run. `if:` routes a
+   job — the review-rerun workflow legitimately tests `github.event.comment`
+   there — and `name:` is a label. Everything else under a job is walked,
+   rather than enumerated container by container: `env`, `with`, `run`,
+   `strategy.matrix`, `working-directory` and whatever GitHub adds next all
+   end up in the same place, which is what stops this rule from becoming the
+   list of special cases it replaces. */
+const INERT_KEYS = new Set(["if", "name"]);
 
-    Not every string in the workflow: an `if:` condition routes the job
-    without fetching anything, and the review-rerun workflow legitimately
-    tests `github.event.comment` there. Env values are included because a ref
-    parked in one reaches a checkout through `${{ env.… }}`. */
-function executionInfluencingValues(workflow) {
-  const values = [];
-  const collect = (map) => {
-    if (map && typeof map === "object") {
-      values.push(...Object.values(map).filter((value) => typeof value === "string"));
-    }
-  };
-
-  collect(workflow.env);
-  for (const job of Object.values(workflow.jobs ?? {})) {
-    if (!job || typeof job !== "object") continue;
-    collect(job.env);
-    /* A reusable-workflow job takes its inputs here rather than in steps. */
-    collect(job.with);
-    if (typeof job.defaults?.run?.["working-directory"] === "string") {
-      values.push(job.defaults.run["working-directory"]);
-    }
-    for (const step of Array.isArray(job.steps) ? job.steps : []) {
-      if (!step || typeof step !== "object") continue;
-      collect(step.env);
-      /* Every input, not just `ref`: an action can take a ref under any name. */
-      collect(step.with);
-      for (const key of ["run", "working-directory"]) {
-        if (typeof step[key] === "string") values.push(step[key]);
-      }
-    }
-  }
-  return values;
+/** Every string under `value` that could decide what is checked out or run. */
+function executionInfluencingValues(value) {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(executionInfluencingValues);
+  if (!value || typeof value !== "object") return [];
+  return Object.entries(value)
+    .filter(([key]) => !INERT_KEYS.has(key))
+    .flatMap(([, nested]) => executionInfluencingValues(nested));
 }
 
 /** Every actor-controlled ref the workflow could check out or execute. */
 function actorControlledRefs(workflow) {
   const found = [];
-  for (const value of executionInfluencingValues(workflow)) {
+  const scanned = [workflow.env, workflow.jobs].flatMap(executionInfluencingValues);
+  for (const value of scanned) {
     for (const pattern of ACTOR_CONTROLLED_REF) {
       const match = value.match(pattern);
       if (match) found.push(match[0]);
