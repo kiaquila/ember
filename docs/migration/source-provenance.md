@@ -147,9 +147,10 @@ second dispatching workflow. The guard reads workflows with a YAML parser rather
 than the template's line patterns — the repository root's one dependency — so a
 quoted key or a flow-style step map cannot slip a rule.
 
-**This is a one-time manual borrowing, not an installation.** No lock file,
-release manifest, managed-file list, profile or updater is present, and the
-template cannot change this repository. A later improvement is taken by reading
+**This is a one-time manual borrowing, not an installation.** No baseline lock
+file, release manifest, managed-file list, profile or updater is present, and
+the template cannot change this repository. The `package-lock.json` files are
+ordinary npm dependency pinning, not that machinery. A later improvement is taken by reading
 the template again and porting it in a normal pull request. The copied files are
 this project's own.
 

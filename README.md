@@ -94,9 +94,11 @@ review gate started as copies of that template's own, at commit
 `ea8501fdb90236fcb891e97b15f7a42a62f76ff1`, and were then cut down to what one
 static page actually needs.
 
-That is the whole relationship. There is no lock file, no release manifest, no
-managed-file list and no updater: nothing here is synced, and nothing upstream
-can change this repository. Taking a later improvement means reading the
+That is the whole relationship. There is no baseline lock file, no release
+manifest, no managed-file list and no updater: nothing here is synced, and
+nothing upstream can change this repository. (`package-lock.json` at the root
+and in `website/` is ordinary npm dependency pinning and unrelated to that
+machinery.) Taking a later improvement means reading the
 template again and porting the part that is worth porting, in a normal pull
 request. These files are this project's own and may be edited freely.
 

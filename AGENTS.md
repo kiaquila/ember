@@ -8,8 +8,10 @@ first for the traced motion references and the client decisions.
 The checks under `scripts/` and `.github/workflows/` were borrowed by hand from
 the `kiaquila/web-design` template and trimmed to this project. They are this
 repository's own files — edit them here when they are wrong. Nothing is synced
-from upstream, so do not add lock files, manifests or an updater; see the
-**Repository baseline** section of [`README.md`](./README.md).
+from upstream, so do not reintroduce a baseline lock file, a release manifest,
+a managed-file list or an updater; see the **Repository baseline** section of
+[`README.md`](./README.md). Ordinary npm lock files are a different thing and
+belong here: the root pins the guard's YAML parser, `website/` pins wrangler.
 
 ## Project rules
 
