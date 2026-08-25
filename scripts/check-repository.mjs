@@ -295,29 +295,49 @@ const ACTOR_CONTROLLED_REF = [
   /github\.event\.(?:issue|comment|pull_request|client_payload|workflow_run)\b/
 ];
 
-/* Keys whose value cannot cause anything to be fetched or run. `if:` routes a
-   job — the review-rerun workflow legitimately tests `github.event.comment`
-   there — and `name:` is a label. Everything else under a job is walked,
-   rather than enumerated container by container: `env`, `with`, `run`,
-   `strategy.matrix`, `working-directory` and whatever GitHub adds next all
-   end up in the same place, which is what stops this rule from becoming the
-   list of special cases it replaces. */
-const INERT_KEYS = new Set(["if", "name"]);
+/* `if:` routes a job or step without fetching anything — it is where the
+   review-rerun workflow legitimately tests `github.event.comment` — and
+   `name:` is a label. Both are skipped only where they mean that: as a key of
+   a job or a step. The same words nested inside a value, `strategy.matrix.name`
+   or a `with.name` input, are data that can still reach a checkout. */
+const INERT_STRUCTURAL_KEYS = new Set(["if", "name"]);
 
-/** Every string under `value` that could decide what is checked out or run. */
-function executionInfluencingValues(value) {
+/** Every string anywhere under `value`. */
+function deepStrings(value) {
   if (typeof value === "string") return [value];
-  if (Array.isArray(value)) return value.flatMap(executionInfluencingValues);
+  if (Array.isArray(value)) return value.flatMap(deepStrings);
   if (!value || typeof value !== "object") return [];
-  return Object.entries(value)
-    .filter(([key]) => !INERT_KEYS.has(key))
-    .flatMap(([, nested]) => executionInfluencingValues(nested));
+  return Object.values(value).flatMap(deepStrings);
+}
+
+/** Every string under a job or step that could decide what is run.
+
+    The walk is what stops this rule from becoming a list of places a ref can
+    sit — env, step inputs, reusable-workflow inputs, `run`,
+    `working-directory`, `strategy.matrix` and whatever GitHub adds next all
+    reach it by default. */
+function executionInfluencingValues(node) {
+  if (!node || typeof node !== "object" || Array.isArray(node)) return deepStrings(node);
+
+  const values = [];
+  for (const [key, value] of Object.entries(node)) {
+    if (INERT_STRUCTURAL_KEYS.has(key)) continue;
+    if (key === "steps" && Array.isArray(value)) {
+      for (const step of value) values.push(...executionInfluencingValues(step));
+      continue;
+    }
+    values.push(...deepStrings(value));
+  }
+  return values;
 }
 
 /** Every actor-controlled ref the workflow could check out or execute. */
 function actorControlledRefs(workflow) {
   const found = [];
-  const scanned = [workflow.env, workflow.jobs].flatMap(executionInfluencingValues);
+  const scanned = [
+    ...deepStrings(workflow.env),
+    ...Object.values(workflow.jobs ?? {}).flatMap(executionInfluencingValues)
+  ];
   for (const value of scanned) {
     for (const pattern of ACTOR_CONTROLLED_REF) {
       const match = value.match(pattern);

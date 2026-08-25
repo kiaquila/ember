@@ -303,6 +303,39 @@ test("a write-capable workflow may not name an actor-controlled ref", () => {
   ].join("\n");
   assert.match(checkWorkflow("matrix.yml", matrix).join("\n"), /names an actor-controlled ref/);
 
+  /* `if:` and `name:` are skipped only as a job's or step's own keys. The
+     same words nested inside a value are data that can still reach a
+     checkout. */
+  const matrixName = [
+    "on:",
+    "  issue_comment:",
+    "    types: [created]",
+    "permissions:",
+    "  contents: write",
+    "jobs:",
+    "  a:",
+    "    name: build",
+    "    strategy:",
+    "      matrix:",
+    "        name: [refs/pull/1/head]"
+  ].join("\n");
+  assert.match(checkWorkflow("matrix-name.yml", matrixName).join("\n"), /names an actor-controlled ref/);
+
+  const inputName = [
+    "on:",
+    "  issue_comment:",
+    "    types: [created]",
+    "permissions:",
+    "  contents: write",
+    "jobs:",
+    "  a:",
+    "    steps:",
+    `      - uses: ${pinned}`,
+    "        with:",
+    "          name: ${{ github.head_ref }}"
+  ].join("\n");
+  assert.match(checkWorkflow("with-name.yml", inputName).join("\n"), /names an actor-controlled ref/);
+
   /* A reusable-workflow job passes its inputs at `job.with`, beside `uses`,
      with no steps of its own. */
   const reusable = [
