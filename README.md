@@ -122,3 +122,9 @@ at the time, are recorded in
   gesture — a scripted `click()` grants no user activation, and a browser
   profile that has already earned media engagement resumes the context
   immediately, which hides exactly the bug a fresh profile reveals.
+
+## License
+
+Released under the [MIT License](./LICENSE). © 2026 Kristina Aquila. The
+borrowed guard and review-gate scripts carry their own upstream notice in
+[`third-party-notices.md`](./third-party-notices.md).
