@@ -1,0 +1,16 @@
+{
+  "name": "ember",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node scripts/check-repository.mjs",
+    "test": "node --test \"tests/*.test.mjs\""
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "description": "Ember — an interactive burn study for the ks·design lab",
+  "devDependencies": {
+    "yaml": "^2.9.0"
+  }
+}

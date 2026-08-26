@@ -1,0 +1,72 @@
+name: Project CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  # Keeps osv-scan running against newly disclosed advisories on a quiet
+  # repository, which a push-only trigger would not.
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  project-ci:
+    name: project-ci
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.18.0"
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --prefix website
+
+      # Builds dist/, runs the site tests, and with them the size budget.
+      - name: Build and test the website
+        run: npm --prefix website run check
+
+      - name: Test the repository harness
+        run: npm test
+
+  repository-guard:
+    name: repository-guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.18.0"
+
+      - name: Install the guard's YAML parser
+        run: npm ci
+
+      - name: Run the repository guard
+        run: npm run check
+
+  osv-scan:
+    name: osv-scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Scan dependencies
+        uses: google/osv-scanner-action/osv-scanner-action@8deb546fdb875b9996d27d4950be7312dac076a1 # v2.5.0
+        with:
+          scan-args: |-
+            --recursive
+            .

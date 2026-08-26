@@ -1,0 +1,55 @@
+name: Codex Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: codex-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  codex-review:
+    name: Codex Review
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout proposed repository state
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The gate is run from the default branch so a pull request cannot
+      # relax the rule that judges it. The job is read-only either way.
+      - name: Checkout trusted Codex review gate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: .codex-review-trusted
+          fetch-depth: 1
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.18.0"
+
+      - name: Validate current-head Codex review
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CODEX_REVIEW_PR_NUMBER: ${{ github.event.pull_request.number }}
+          CODEX_REVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CODEX_REVIEW_WAIT_MS: "30000"
+          CODEX_REVIEW_POLL_MS: "5000"
+          CODEX_REVIEW_DEBOUNCE_MS: "5000"
+        run: |
+          set -euo pipefail
+          script_root="$GITHUB_WORKSPACE/.codex-review-trusted"
+          if [ ! -f "$script_root/scripts/codex-review-gate.mjs" ]; then
+            echo "::warning::Trusted Codex review gate is not on the default branch yet; using this branch's copy."
+            script_root="$GITHUB_WORKSPACE"
+          fi
+          node "$script_root/scripts/codex-review-gate.mjs"

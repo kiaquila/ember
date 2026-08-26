@@ -75,17 +75,50 @@ The study is published as its own Cloudflare Worker, `ember`, at
 [ember.ks-design.workers.dev](https://ember.ks-design.workers.dev) and at the
 custom domain [ember.ks-design.art](https://ember.ks-design.art) the portfolio
 links. Its dashboard settings live in
-[`docs/stage-hosting.md`](../docs/stage-hosting.md); the deploy itself is run
+[`docs/stage-hosting.md`](./docs/stage-hosting.md); the deploy itself is run
 by Cloudflare, not by this repository.
+
+**Cloudflare is not connected to this repository, and nothing here deploys.**
+The Worker's Git connection was not moved when this repository was created: it is still `kiaquila/web-design`
+with root `ember/website`. Both URLs above keep working from that build. The
+cutover, its verification and its rollback are written down in
+[`docs/stage-hosting.md`](./docs/stage-hosting.md) and need the account owner,
+so until they run, `main` here deploys nothing and the `ember/` path in the old
+repository must stay in place as the rollback route.
+
+## Repository baseline
+
+The checks in this repository were **borrowed by hand** from the
+`kiaquila/web-design` template — `scripts/check-repository.mjs` and the Codex
+review gate started as copies of that template's own, at commit
+`ea8501fdb90236fcb891e97b15f7a42a62f76ff1`, and were then cut down to what one
+static page actually needs.
+
+That is the whole relationship. There is no baseline lock file, no release
+manifest, no managed-file list and no updater: nothing here is synced, and
+nothing upstream can change this repository. (`package-lock.json` at the root
+and in `website/` is ordinary npm dependency pinning and unrelated to that
+machinery.) Taking a later improvement means reading the
+template again and porting the part that is worth porting, in a normal pull
+request. These files are this project's own and may be edited freely.
+
+How this repository was extracted from the monorepository, and the proofs taken
+at the time, are recorded in
+[`docs/migration/source-provenance.md`](./docs/migration/source-provenance.md).
 
 ## Checks
 
-- `npm --prefix ember/website run check` — the build plus its tests.
-- `npm --prefix ember/website run dev` — build and serve `dist/` on port 4660.
+- `npm --prefix website run check` — the build plus its tests, including the
+  size budget for the four published files. This is the project's real check.
+- `npm run check` — the repository guard: tracked generated output, committed
+  secrets, symbolic links, and workflow permissions and action pinning. It
+  parses the workflows with the same YAML the runner uses, which is the root's
+  one dependency; `npm ci` installs it.
+- `npm test` — the guard's own tests and the Codex review gate's rules.
+- `npm --prefix website run dev` — build and serve `dist/` on port 4660.
 - Verify by hand: hover ignition and recovery, the full Play cycle (burn →
   gone → reassemble → loop), Stop, mute, the footer link, the favicon in light
   and dark browser themes, and a narrow-viewport layout. Sound needs a real
   gesture — a scripted `click()` grants no user activation, and a browser
   profile that has already earned media engagement resumes the context
   immediately, which hides exactly the bug a fresh profile reveals.
-- `node scripts/check-repository.mjs` from the repository root.
