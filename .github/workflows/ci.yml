@@ -65,8 +65,20 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Scan dependencies
-        uses: google/osv-scanner-action/osv-scanner-action@8deb546fdb875b9996d27d4950be7312dac076a1 # v2.5.0
+        uses: google/osv-scanner-action/osv-scanner-action@6e4298ebc4db23e847df9b2e2de2939d6f066c67 # v2.5.1
         with:
           scan-args: |-
+            --format=json
+            --output=osv-results.json
             --recursive
             .
+        continue-on-error: true
+
+      - name: Report vulnerabilities
+        uses: google/osv-scanner-action/osv-reporter-action@6e4298ebc4db23e847df9b2e2de2939d6f066c67 # v2.5.1
+        with:
+          scan-args: |-
+            --output=osv-results.sarif
+            --new=osv-results.json
+            --gh-annotations=true
+            --fail-on-vuln=true

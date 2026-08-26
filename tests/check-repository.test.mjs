@@ -3,15 +3,19 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { checkActionManifest, checkRepository, checkWorkflow } from "../scripts/check-repository.mjs";
 
+/* The guard requires these two files to exist, so every scratch repository
+   starts with them; the case that is about their absence deletes them again. */
 function scratchRepository(files) {
   const root = mkdtempSync(join(tmpdir(), "ember-guard-"));
-  for (const [path, contents] of Object.entries(files)) {
+  const seeded = { ".gitattributes": "", ".github/dependabot.yml": "version: 2\n", ...files };
+  for (const [path, contents] of Object.entries(seeded)) {
     const target = join(root, path);
     mkdirSync(join(target, ".."), { recursive: true });
     writeFileSync(target, contents);
@@ -60,7 +64,7 @@ test("secrets and personal paths in text files are refused", () => {
 });
 
 test("binary files are not scanned as text", () => {
-  const root = mkdtempSync(join(tmpdir(), "ember-guard-"));
+  const root = scratchRepository({});
   /* A NUL in the head is the binary marker; the bytes after it would
      otherwise read as an AWS key. */
   writeFileSync(join(root, "card.png"), Buffer.concat([
@@ -74,6 +78,82 @@ test("symbolic links are refused", () => {
   const root = scratchRepository({ "real.txt": "x" });
   symlinkSync(join(root, "real.txt"), join(root, "link.txt"));
   assert.match(checkRepository(root, ["link.txt"]).join("\n"), /Symbolic links are not allowed/);
+});
+
+test("the dependency update policy and language rules are required", () => {
+  const root = scratchRepository({});
+  rmSync(join(root, ".gitattributes"));
+  rmSync(join(root, ".github/dependabot.yml"));
+  const failures = checkRepository(root, []).join("\n");
+  assert.match(failures, /Missing harness file: \.gitattributes/);
+  assert.match(failures, /Missing harness file: \.github\/dependabot\.yml/);
+});
+
+/* The three rules below read this repository's own files: those files are the
+   policy, so there is nothing to fixture. */
+const repositoryRoot = join(import.meta.dirname, "..");
+
+test("the harness stays out of GitHub language statistics", () => {
+  const attribute = (path) => spawnSync("git", ["check-attr", "linguist-vendored", "--", path], {
+    cwd: repositoryRoot,
+    encoding: "utf8"
+  }).stdout.trim();
+
+  for (const harness of [
+    "scripts/check-repository.mjs",
+    "scripts/codex-review-gate.mjs",
+    "scripts/codex-review-helpers.mjs",
+    "scripts/codex-review-rerun.mjs",
+    "tests/check-repository.test.mjs",
+    "tests/codex-review-gate.test.mjs"
+  ]) {
+    assert.equal(attribute(harness), `${harness}: linguist-vendored: set`);
+  }
+
+  /* The page and the scripts that build it are this project's product code
+     and stay counted. */
+  for (const product of [
+    "website/src/index.html",
+    "website/scripts/build.mjs",
+    "website/scripts/make-og.mjs",
+    "website/worker/index.ts"
+  ]) {
+    assert.equal(attribute(product), `${product}: linguist-vendored: unspecified`);
+  }
+});
+
+test("dependabot groups minor and patch updates behind a cooldown", () => {
+  const [, actions, ...npm] = readFileSync(join(repositoryRoot, ".github/dependabot.yml"), "utf8")
+    .split(/^\s*- package-ecosystem:/m);
+  assert.match(actions, /^\s*"github-actions"/);
+  /* One npm entry per directory that actually holds a package.json and a
+     lockfile: the root's guard parser and the website's build tooling. */
+  assert.equal(npm.length, 2);
+  assert.match(npm[0], /^\s*"npm"[\s\S]*directory: "\/"/);
+  assert.match(npm[1], /^\s*"npm"[\s\S]*directory: "\/website"/);
+
+  for (const ecosystem of [actions, ...npm]) {
+    assert.match(ecosystem, /interval: "weekly"/);
+    assert.match(ecosystem, /default-days: 7/);
+    assert.match(ecosystem, /update-types:\s*\n\s*- "minor"\s*\n\s*- "patch"/);
+    assert.doesNotMatch(ecosystem, /"major"/);
+  }
+
+  /* Action tags are not guaranteed to be semantic versions. */
+  assert.doesNotMatch(actions, /semver-[a-z]+-days/);
+  for (const ecosystem of npm) {
+    assert.match(ecosystem, /semver-major-days: 14/);
+    assert.match(ecosystem, /semver-minor-days: 7/);
+    assert.match(ecosystem, /semver-patch-days: 3/);
+  }
+});
+
+test("the OSV scan reports findings and fails the workflow", () => {
+  const workflow = readFileSync(join(repositoryRoot, ".github/workflows/ci.yml"), "utf8");
+  assert.match(workflow, /osv-scanner-action@[a-f0-9]{40}/);
+  assert.match(workflow, /osv-reporter-action@[a-f0-9]{40}/);
+  assert.match(workflow, /--gh-annotations=true/);
+  assert.match(workflow, /--fail-on-vuln=true/);
 });
 
 test("workflows must be permission-scoped and SHA-pinned", () => {

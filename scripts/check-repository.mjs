@@ -45,6 +45,12 @@ const PERSONAL_PATHS = [/\/Users\/[A-Za-z0-9._-]+\//, /\/home\/[A-Za-z0-9._-]+\/
 /** Files large enough that scanning them for text patterns is pointless. */
 const MAX_SCANNED_BYTES = 2_000_000;
 
+/* Policy that lives in a file rather than in this script: deleting either one
+   silently switches the policy off, so their absence is a failure like any
+   other. `.gitattributes` keeps the borrowed harness out of the language
+   statistics; `.github/dependabot.yml` schedules the weekly updates. */
+const REQUIRED_FILES = [".gitattributes", ".github/dependabot.yml"];
+
 function trackedFiles(root) {
   const listed = spawnSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], {
     cwd: root,
@@ -59,6 +65,12 @@ function trackedFiles(root) {
 /** Every problem found in the repository at `root`; empty means it passes. */
 export function checkRepository(root, files = trackedFiles(root)) {
   const failures = [];
+
+  for (const required of REQUIRED_FILES) {
+    if (!existsSync(join(root, required))) {
+      failures.push(`Missing harness file: ${required}`);
+    }
+  }
 
   for (const file of files) {
     const normalized = file.split(sep).join("/");

@@ -1,6 +1,36 @@
+# Weekly dependency updates for this repository.
+#
+# Minor and patch updates arrive as one grouped pull request per ecosystem;
+# major updates stay separate so they are reviewed individually. The cooldown
+# keeps a freshly published version out of the repository for a few days.
+#
+# This file only schedules routine version updates. Dependabot alerts and
+# Dependabot security updates are repository settings and are enabled there.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    # Action tags are not guaranteed to be semantic versions, so only the
+    # default cooldown applies to this ecosystem.
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions-minor-and-patch:
+        applies-to: "version-updates"
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # The root package.json and lockfile pin the repository guard's YAML parser.
+  - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
@@ -14,7 +44,31 @@ updates:
       semver-minor-days: 7
       semver-patch-days: 3
     groups:
-      github-actions-minor-and-patch:
+      npm-root-minor-and-patch:
+        applies-to: "version-updates"
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # website/package.json and its lockfile pin wrangler. The page itself has no
+  # dependencies; these are build and deploy tools only.
+  - package-ecosystem: "npm"
+    directory: "/website"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 3
+    groups:
+      npm-website-minor-and-patch:
         applies-to: "version-updates"
         patterns:
           - "*"
