@@ -57,12 +57,13 @@ tags are not guaranteed to be semantic versions.
 - Preserve the approved interaction contract: hover = local burn + recovery;
   Play = one full burn → rebirth cycle with strikes — the figure burns down
   completely, reassembles as a new silhouette, and the control resets from
-  Stop back to Play when the cycle completes; Stop mid-cycle aborts and
-  recovers the current figure — the new silhouette is the ending of a
-  completed cycle only (the shape-shifting rebirth was rolled back on
-  2026-08-19 and explicitly requested back on 2026-08-26 as this
-  single-cycle ending; do not bring back the endless cycle repeat without
-  the client asking); controls are play/stop and mute only; the
+  Stop back to Play when the cycle completes; the ash rebirth is the point
+  of no return — Stop before it aborts the cycle and recovers the original
+  figure, Stop after it lets the new silhouette finish reassembling (the
+  shape-shifting rebirth was rolled back on 2026-08-19 and explicitly
+  requested back on 2026-08-26 as this single-cycle ending; do not bring
+  back the endless cycle repeat without the client asking); controls are
+  play/stop and mute only; the
   favicon (inline SVG data URI + PNG fallbacks) inverts for dark color
   schemes; the wordmark is "ks·design" in tracked caps with the brand-gold
   dot on the baseline, hugging the KS with a wide gap before DESIGN

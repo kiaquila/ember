@@ -18,8 +18,9 @@ synthesized with the Web Audio API, no audio files).
   makes the figure burn locally and then recover instead of burning away;
   Play runs the burn-and-reassemble cycle with the tuning-fork strike exactly
   once — the figure burns down completely, reassembles as a new silhouette,
-  and the control resets from Stop back to Play, while Stop pressed
-  mid-cycle aborts and recovers the current figure (the shape-shifting rebirth
+  and the control resets from Stop back to Play; the ash rebirth is the
+  point of no return — Stop before it recovers the original figure, Stop
+  after it lets the new silhouette finish reassembling (the shape-shifting rebirth
   was tried and rolled back on 2026-08-19, then explicitly requested again on
   2026-08-26 as the ending of this single cycle; the endless repeat of the
   cycle was dropped the same day); controls are
@@ -150,7 +151,8 @@ at the time, are recorded in
 - `npm --prefix website run dev` — build and serve `dist/` on port 4660.
 - Verify by hand: hover ignition and recovery, the single full Play cycle
   (burn → gone → a new silhouette reassembles → the control resets to Play),
-  Stop mid-cycle, mute, the footer link, the favicon in light
+  Stop both before and after the rebirth, mute, the footer link, the
+  favicon in light
   and dark browser themes, and a narrow-viewport layout. Sound needs a real
   gesture — a scripted `click()` grants no user activation, and a browser
   profile that has already earned media engagement resumes the context
