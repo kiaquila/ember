@@ -55,8 +55,11 @@ tags are not guaranteed to be semantic versions.
 - The tuning-fork sound is synthesized (136.1 Hz fundamental). Do not add
   audio files or third-party libraries for it.
 - Preserve the approved interaction contract: hover = local burn + recovery;
-  Play = full burn → reassemble cycle with strikes (a shape-shifting rebirth
-  variant was tried and rolled back on 2026-08-19 — do not reintroduce it
+  Play = one full burn → rebirth cycle with strikes — the figure burns down
+  completely, reassembles as a new silhouette, and the control resets from
+  Stop back to Play when the cycle completes (the shape-shifting rebirth was
+  rolled back on 2026-08-19 and explicitly requested back on 2026-08-26 as
+  this single-cycle ending; do not bring back the endless cycle repeat
   without the client asking); controls are play/stop and mute only; the
   favicon (inline SVG data URI + PNG fallbacks) inverts for dark color
   schemes; the wordmark is "ks·design" in tracked caps with the brand-gold

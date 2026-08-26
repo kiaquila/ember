@@ -14,10 +14,14 @@ synthesized with the Web Audio API, no audio files).
   no assets, code, or copy were taken from it.
 - Interaction/layout reference: <https://reactive-dots.vercel.app> — a
   centered figure with a minimal control row at the bottom.
-- Client decisions (Kristina, 2026-08-19): hover makes the figure burn
-  locally and then recover instead of burning away; Play runs the full
-  burn-and-reassemble cycle with the tuning-fork strike (a shape-shifting
-  rebirth variant was tried and rolled back the same day); controls are
+- Client decisions (Kristina, 2026-08-19; Play revised 2026-08-26): hover
+  makes the figure burn locally and then recover instead of burning away;
+  Play runs the burn-and-reassemble cycle with the tuning-fork strike exactly
+  once — the figure burns down completely, reassembles as a new silhouette,
+  and the control resets from Stop back to Play (the shape-shifting rebirth
+  was tried and rolled back on 2026-08-19, then explicitly requested again on
+  2026-08-26 as the ending of this single cycle; the endless repeat of the
+  cycle was dropped the same day); controls are
   limited to play/stop and mute; the favicon is the wireframe ball with an
   inverted palette for dark color schemes plus PNG fallbacks for Safari; the
   wordmark is "ks·design" — tracked caps with the brand-gold dot on the
