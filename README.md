@@ -102,6 +102,32 @@ machinery.) Taking a later improvement means reading the
 template again and porting the part that is worth porting, in a normal pull
 request. These files are this project's own and may be edited freely.
 
+### Dependency and language policy
+
+Two more files were borrowed from the same template (`kiaquila/web-design#49`)
+and trimmed the same way:
+
+- [`.github/dependabot.yml`](./.github/dependabot.yml) — weekly updates for
+  GitHub Actions and for the two directories that hold a `package.json` and a
+  lockfile (the root's YAML parser and `website/`'s build tooling). Minor and
+  patch releases arrive as one grouped pull request per ecosystem, majors stay
+  separate, and a cooldown holds a freshly published version back: 7 days by
+  default, and 14/7/3 by semver level for npm. Action tags are not guaranteed
+  to be semantic versions, so the GitHub Actions entry carries only the
+  default. This file schedules routine version updates and nothing else —
+  Dependabot alerts and security updates are repository settings and are
+  enabled there.
+- [`.gitattributes`](./.gitattributes) — the four borrowed harness scripts and
+  their two test files are `linguist-vendored`, so the language bar describes
+  the page rather than its guardrails. The page, its build scripts and the
+  Worker are product code and stay counted.
+
+The `osv-scan` job in [`ci.yml`](./.github/workflows/ci.yml) follows the
+template's two-step form: the scanner writes JSON under `continue-on-error`,
+then `osv-reporter-action` turns it into pull-request annotations and fails the
+job on a vulnerability. Both steps are pinned to the same SHA and the workflow's
+permissions are unchanged (`contents: read`).
+
 How this repository was extracted from the monorepository, and the proofs taken
 at the time, are recorded in
 [`docs/migration/source-provenance.md`](./docs/migration/source-provenance.md).
@@ -111,9 +137,10 @@ at the time, are recorded in
 - `npm --prefix website run check` — the build plus its tests, including the
   size budget for the four published files. This is the project's real check.
 - `npm run check` — the repository guard: tracked generated output, committed
-  secrets, symbolic links, and workflow permissions and action pinning. It
-  parses the workflows with the same YAML the runner uses, which is the root's
-  one dependency; `npm ci` installs it.
+  secrets, symbolic links, workflow permissions and action pinning, and the
+  presence of the two policy files below. It parses the workflows with the same
+  YAML the runner uses, which is the root's one dependency; `npm ci` installs
+  it.
 - `npm test` — the guard's own tests and the Codex review gate's rules.
 - `npm --prefix website run dev` — build and serve `dist/` on port 4660.
 - Verify by hand: hover ignition and recovery, the full Play cycle (burn →

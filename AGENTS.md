@@ -13,6 +13,13 @@ a managed-file list or an updater; see the **Repository baseline** section of
 [`README.md`](./README.md). Ordinary npm lock files are a different thing and
 belong here: the root pins the guard's YAML parser, `website/` pins wrangler.
 
+`.gitattributes` and `.github/dependabot.yml` were borrowed the same way and
+are required by `npm run check`. Keep `linguist-vendored` on the borrowed
+harness only — never on the page, its build scripts or the Worker — and keep
+the Dependabot entries pointed at directories that really hold a `package.json`
+and a lockfile. `semver-*-days` stays off the GitHub Actions ecosystem: action
+tags are not guaranteed to be semantic versions.
+
 ## Project rules
 
 - This is a self-contained lab piece, not a client business site. The page

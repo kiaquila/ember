@@ -1,0 +1,14 @@
+# Keep the borrowed harness out of GitHub Linguist language statistics so the
+# repository language bar describes the page, not its guardrails. These files
+# are development infrastructure, hand-copied from the `kiaquila/web-design`
+# template; the page and its build scripts under `website/` are product code
+# and stay counted.
+#
+# Delete a line if this project starts owning that file as product code, and
+# add project-specific rules below this block.
+scripts/check-repository.mjs      linguist-vendored
+scripts/codex-review-gate.mjs     linguist-vendored
+scripts/codex-review-helpers.mjs  linguist-vendored
+scripts/codex-review-rerun.mjs    linguist-vendored
+tests/check-repository.test.mjs   linguist-vendored
+tests/codex-review-gate.test.mjs  linguist-vendored
