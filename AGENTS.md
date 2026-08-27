@@ -44,11 +44,11 @@ tags are not guaranteed to be semantic versions.
   [`docs/stage-hosting.md`](./docs/stage-hosting.md). Its Content-Security-
   Policy allows inline script and style because the page is one file by
   design; that allowance is safe only while the build check keeps the page
-  free of off-origin references, so do not weaken that check. The Worker still
-  builds from `kiaquila/web-design` at root `ember/website`: the Cloudflare
-  integration for this repository is off and its Git connection was not moved,
-  so `main` here deploys nothing and the old path stays in place as the
-  rollback route until the documented cutover is run by the account owner.
+  free of off-origin references, so do not weaken that check. The Worker builds
+  from this repository at root `website/`: the account owner ran the documented
+  cutover, so `main` here deploys the stage and pull requests get a Cloudflare
+  preview build. The `ember/website` path in `kiaquila/web-design` no longer
+  builds this Worker and is kept only as the rollback route.
 - The motion concept is traced in [`README.md`](./README.md). Do not copy
   assets or code from the referenced Pinterest pin or reactive-dots site;
   only the documented motion idea is reproduced.

@@ -42,8 +42,8 @@ which serves the one page for any unknown path.
 
 The custom domain is bound to the Worker in Cloudflare, not to the Git
 connection. Changing which repository builds this Worker does not touch it —
-which is exactly why the cutover below must reuse this Worker rather than
-create a second one.
+which is exactly why the cutover below reused this Worker rather than creating
+a second one.
 
 `https://ember.ks-design.art` is the origin baked into the page's `og:url` and
 `og:image` meta tags and into `ORIGIN` in `website/scripts/build.mjs`. Those two
@@ -52,37 +52,41 @@ absolute URLs are the only ones the build allows, and only as the complete
 another domain would therefore be a code change here, not just a dashboard
 change.
 
-## Current connection — Cloudflare integration off
+## Current connection — this repository builds the Worker
 
-**This repository has no Cloudflare integration and deploys nothing.** The
+**The cutover is done: the Worker `ember` builds from `kiaquila/ember`.** The
 Worker was created while the project lived in the `kiaquila/web-design`
-monorepository and **still builds from that repository**. Nothing in Cloudflare
-has been changed by this migration, and connecting it is out of scope here: the
-cutover below is an account-owner action, to be run deliberately and separately.
+monorepository; the account owner moved its Git connection here, and pushing to
+`main` in this repository is now what updates the stage. The first production
+build from here was the merge of
+[pull request #5](https://github.com/kiaquila/ember/pull/5) (`2c5cd6e`), and
+Cloudflare's `Workers Builds: ember` check now runs on this repository's pull
+requests and commits.
 
 The `stage:deploy` and `stage:preview` scripts in `website/package.json` are
-what Cloudflare runs on its own builders once connected. No workflow in this
-repository calls them, and no Cloudflare credential is stored in GitHub.
+what Cloudflare runs on its own builders. No workflow in this repository calls
+them, and no Cloudflare credential is stored in GitHub.
 
 | Setting | Value in Cloudflare today |
 | --- | --- |
 | Worker name | `ember` |
-| Repository | `kiaquila/web-design` |
+| Repository | `kiaquila/ember` |
 | Production branch | `main` |
-| Root directory | `ember/website` |
+| Root directory | `website` |
 | Build command | `npm run build` |
 | Production deploy command | `npm run stage:deploy` |
 | Non-production deploy command | `npm run stage:preview` |
-| Included build watch path | `ember/*` |
+| Included build watch path | default — this repository holds one project |
 
-The source path `ember/` is still present in `kiaquila/web-design`, so that
-connection keeps working until it is deliberately changed.
+`kiaquila/web-design` no longer builds this Worker. Its `ember/` source path is
+still present there, which is what keeps the full rollback below available.
 
-## Cutover to this repository
+## Cutover to this repository — completed
 
-Only the account owner can do this: the Git connection and the build credentials
-live in Cloudflare. Do not start before this repository's migration pull request
-is merged and its checks are green on `main`.
+This is the procedure the account owner followed, kept as the record of the
+order it takes and as the procedure to repeat if the connection ever has to be
+rebuilt. Only the account owner can run it: the Git connection and the build
+credentials live in Cloudflare.
 
 1. In Cloudflare, record the Worker's **current active version id** and the
    commit it was built from. That is the rollback point.
@@ -95,7 +99,7 @@ is merged and its checks are green on `main`.
    and do not rename this one. Cloudflare requires the dashboard name to match
    `name` in `website/wrangler.json`, and the `ember.ks-design.art` custom
    domain is attached to this Worker.
-5. Enter the settings below.
+5. Enter the settings from **Current connection** above.
 6. Under **Settings → Build → Branch control**, keep `main` as production and
    enable builds for non-production branches.
 7. Open a throwaway pull request, or push a branch, and confirm the preview
@@ -103,22 +107,11 @@ is merged and its checks are green on `main`.
 8. Only then let `main` build, and verify both the stable URL and the custom
    domain.
 
-| Setting | Value after cutover |
-| --- | --- |
-| Worker name | `ember` (unchanged) |
-| Repository | `kiaquila/ember` |
-| Production branch | `main` |
-| Root directory | `website` |
-| Build command | `npm run build` |
-| Production deploy command | `npm run stage:deploy` |
-| Non-production deploy command | `npm run stage:preview` |
-| Included build watch path | default — this repository holds one project |
-
 The monorepository watch path `ember/*` matches nothing here and would stop
-every build. Clearing it back to the default is what replaces it; narrowing it
-to `website/*` is also correct and only skips builds for root-document changes.
+every build, which is why it was cleared back to the default; narrowing it to
+`website/*` is also correct and only skips builds for root-document changes.
 
-## Verify after cutover
+## Verify the stage
 
 - `https://ember.ks-design.workers.dev` and `https://ember.ks-design.art` both
   return the study, and an unknown path returns the same page — the asset
@@ -139,20 +132,22 @@ to `website/*` is also correct and only skips builds for root-document changes.
 
 ## Rollback
 
-- **Fastest:** in Cloudflare, roll the Worker back to the version id recorded in
-  step 1. That restores the previously served build without any Git change, and
-  the custom domain follows it because it is bound to the Worker.
+- **Fastest:** in Cloudflare, roll the Worker back to an earlier version —
+  including the pre-cutover version id recorded in step 1. That restores a
+  previously served build without any Git change, and the custom domain follows
+  it because it is bound to the Worker.
 - **Full:** disconnect `kiaquila/ember`, reconnect `kiaquila/web-design` with
   root `ember/website` and the `ember/*` watch path, and rebuild from `main`.
-  This works for as long as `ember/` remains in that repository, which is why
-  the source path must not be deleted until this stage has been verified from
-  here.
+  This works for as long as `ember/` remains in that repository. That source
+  path is still there and is to be kept as the rollback route.
 
-## After a verified cutover
+## Still owed in the monorepository
 
 `kiaquila/web-design` still lists `ember` in `stageProjects` in its
 `.repo-guard.json`, which is what mirrors stable builds into that repository's
-`ember / stage` GitHub environment. Once this repository owns the Worker, that
-entry describes a stage the monorepository no longer builds. Remove it there in
-its own pull request, following that repository's documented procedure for
-retiring a stage — and keep the project source and history in place.
+`ember / stage` GitHub environment. Now that this repository owns the Worker,
+that entry describes a stage the monorepository no longer builds. Removing it
+is the account owner's next step there: its own pull request in that
+repository, following its documented procedure for retiring a stage — and the
+project source and history stay in place, both as history and as the full
+rollback route above.
