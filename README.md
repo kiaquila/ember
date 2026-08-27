@@ -84,13 +84,12 @@ links. Its dashboard settings live in
 [`docs/stage-hosting.md`](./docs/stage-hosting.md); the deploy itself is run
 by Cloudflare, not by this repository.
 
-**Cloudflare is not connected to this repository, and nothing here deploys.**
-The Worker's Git connection was not moved when this repository was created: it is still `kiaquila/web-design`
-with root `ember/website`. Both URLs above keep working from that build. The
-cutover, its verification and its rollback are written down in
-[`docs/stage-hosting.md`](./docs/stage-hosting.md) and need the account owner,
-so until they run, `main` here deploys nothing and the `ember/` path in the old
-repository must stay in place as the rollback route.
+**Cloudflare builds the Worker from this repository.** The Git connection was
+moved here from `kiaquila/web-design` after this repository was created, so
+`main` here is what updates the stage and pull requests get a Cloudflare
+preview build. The cutover, its verification and its rollback are written down
+in [`docs/stage-hosting.md`](./docs/stage-hosting.md). The `ember/` path in the
+old repository is kept in place as the rollback route.
 
 ## Repository baseline
 
