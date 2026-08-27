@@ -211,6 +211,15 @@ test("reduced motion is honoured", () => {
   assert.match(page, /reducedMotion \? 0 :/);
 });
 
+test("play runs a single cycle and hands the control back", () => {
+  /* The client's 2026-08-26 decision: Play burns the figure down once, a new
+     silhouette reassembles from the ash, and the control returns to Play by
+     itself. The looping "calm" phase must not come back. */
+  assert.doesNotMatch(page, /"calm"/);
+  assert.match(page, /buildFigure\(\);\s*\n\s*for \(var rb = 0; rb < N; rb\+\+\) burn\[rb\] = 1;/);
+  assert.match(page, /if \(playing\) resetPlayButton\(\);/);
+});
+
 test("the Worker attaches security headers to the assets", () => {
   for (const header of [
     "X-Content-Type-Options",
