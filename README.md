@@ -14,10 +14,16 @@ synthesized with the Web Audio API, no audio files).
   no assets, code, or copy were taken from it.
 - Interaction/layout reference: <https://reactive-dots.vercel.app> — a
   centered figure with a minimal control row at the bottom.
-- Client decisions (Kristina, 2026-08-19): hover makes the figure burn
-  locally and then recover instead of burning away; Play runs the full
-  burn-and-reassemble cycle with the tuning-fork strike (a shape-shifting
-  rebirth variant was tried and rolled back the same day); controls are
+- Client decisions (Kristina, 2026-08-19; Play revised 2026-08-26): hover
+  makes the figure burn locally and then recover instead of burning away;
+  Play runs the burn-and-reassemble cycle with the tuning-fork strike exactly
+  once — the figure burns down completely, reassembles as a new silhouette,
+  and the control resets from Stop back to Play; the ash rebirth is the
+  point of no return — Stop before it recovers the original figure, Stop
+  after it lets the new silhouette finish reassembling (the shape-shifting rebirth
+  was tried and rolled back on 2026-08-19, then explicitly requested again on
+  2026-08-26 as the ending of this single cycle; the endless repeat of the
+  cycle was dropped the same day); controls are
   limited to play/stop and mute; the favicon is the wireframe ball with an
   inverted palette for dark color schemes plus PNG fallbacks for Safari; the
   wordmark is "ks·design" — tracked caps with the brand-gold dot on the
@@ -78,13 +84,12 @@ links. Its dashboard settings live in
 [`docs/stage-hosting.md`](./docs/stage-hosting.md); the deploy itself is run
 by Cloudflare, not by this repository.
 
-**Cloudflare is not connected to this repository, and nothing here deploys.**
-The Worker's Git connection was not moved when this repository was created: it is still `kiaquila/web-design`
-with root `ember/website`. Both URLs above keep working from that build. The
-cutover, its verification and its rollback are written down in
-[`docs/stage-hosting.md`](./docs/stage-hosting.md) and need the account owner,
-so until they run, `main` here deploys nothing and the `ember/` path in the old
-repository must stay in place as the rollback route.
+**Cloudflare builds the Worker from this repository.** The Git connection was
+moved here from `kiaquila/web-design` after this repository was created, so
+`main` here is what updates the stage and pull requests get a Cloudflare
+preview build. The cutover, its verification and its rollback are written down
+in [`docs/stage-hosting.md`](./docs/stage-hosting.md). The `ember/` path in the
+old repository is kept in place as the rollback route.
 
 ## Repository baseline
 
@@ -143,8 +148,10 @@ at the time, are recorded in
   it.
 - `npm test` — the guard's own tests and the Codex review gate's rules.
 - `npm --prefix website run dev` — build and serve `dist/` on port 4660.
-- Verify by hand: hover ignition and recovery, the full Play cycle (burn →
-  gone → reassemble → loop), Stop, mute, the footer link, the favicon in light
+- Verify by hand: hover ignition and recovery, the single full Play cycle
+  (burn → gone → a new silhouette reassembles → the control resets to Play),
+  Stop both before and after the rebirth, mute, the footer link, the
+  favicon in light
   and dark browser themes, and a narrow-viewport layout. Sound needs a real
   gesture — a scripted `click()` grants no user activation, and a browser
   profile that has already earned media engagement resumes the context

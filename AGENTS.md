@@ -44,20 +44,26 @@ tags are not guaranteed to be semantic versions.
   [`docs/stage-hosting.md`](./docs/stage-hosting.md). Its Content-Security-
   Policy allows inline script and style because the page is one file by
   design; that allowance is safe only while the build check keeps the page
-  free of off-origin references, so do not weaken that check. The Worker still
-  builds from `kiaquila/web-design` at root `ember/website`: the Cloudflare
-  integration for this repository is off and its Git connection was not moved,
-  so `main` here deploys nothing and the old path stays in place as the
-  rollback route until the documented cutover is run by the account owner.
+  free of off-origin references, so do not weaken that check. The Worker builds
+  from this repository at root `website/`: the account owner ran the documented
+  cutover, so `main` here deploys the stage and pull requests get a Cloudflare
+  preview build. The `ember/website` path in `kiaquila/web-design` no longer
+  builds this Worker and is kept only as the rollback route.
 - The motion concept is traced in [`README.md`](./README.md). Do not copy
   assets or code from the referenced Pinterest pin or reactive-dots site;
   only the documented motion idea is reproduced.
 - The tuning-fork sound is synthesized (136.1 Hz fundamental). Do not add
   audio files or third-party libraries for it.
 - Preserve the approved interaction contract: hover = local burn + recovery;
-  Play = full burn → reassemble cycle with strikes (a shape-shifting rebirth
-  variant was tried and rolled back on 2026-08-19 — do not reintroduce it
-  without the client asking); controls are play/stop and mute only; the
+  Play = one full burn → rebirth cycle with strikes — the figure burns down
+  completely, reassembles as a new silhouette, and the control resets from
+  Stop back to Play when the cycle completes; the ash rebirth is the point
+  of no return — Stop before it aborts the cycle and recovers the original
+  figure, Stop after it lets the new silhouette finish reassembling (the
+  shape-shifting rebirth was rolled back on 2026-08-19 and explicitly
+  requested back on 2026-08-26 as this single-cycle ending; do not bring
+  back the endless cycle repeat without the client asking); controls are
+  play/stop and mute only; the
   favicon (inline SVG data URI + PNG fallbacks) inverts for dark color
   schemes; the wordmark is "ks·design" in tracked caps with the brand-gold
   dot on the baseline, hugging the KS with a wide gap before DESIGN

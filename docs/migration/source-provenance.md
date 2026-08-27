@@ -123,9 +123,10 @@ they were.
   root one.
 - The stage sections of both documents point at this repository's own
   [`../stage-hosting.md`](../stage-hosting.md) instead of the monorepository's,
-  and both now say plainly that the Worker has not been moved yet and that the
-  Cloudflare integration for this repository is off. Worker names, domains and
-  account identifiers are project-owned, so they belong here.
+  and both said plainly, at the time, that the Worker had not been moved yet
+  and that the Cloudflare integration for this repository was off. Worker
+  names, domains and account identifiers are project-owned, so they belong
+  here.
 - `README.md` gained a **Repository baseline** section recording the manual
   borrowing and pointing at this document.
 - `CLAUDE.md` and the root `package.json` were written for this project.
@@ -164,11 +165,15 @@ keeps the 1 MiB limit this project already had.
 
 ## Cloudflare — prepared, not switched
 
-Nothing in Cloudflare was changed during this migration. The Worker `ember`
-still builds from `kiaquila/web-design` at root `ember/website`, and both
-`https://ember.ks-design.workers.dev` and the custom domain
-`https://ember.ks-design.art` keep answering from that build. The target
-settings, the verification and the rollback-safe cutover order are in
-[`../stage-hosting.md`](../stage-hosting.md). Until the cutover happens, the
-source directory in the monorepository must stay in place, and the two
-repositories must never both deploy this Worker.
+Nothing in Cloudflare was changed during this migration. When this repository
+was created the Worker `ember` still built from `kiaquila/web-design` at root
+`ember/website`, and both `https://ember.ks-design.workers.dev` and the custom
+domain `https://ember.ks-design.art` kept answering from that build. The target
+settings, the verification and the rollback-safe cutover order were written
+down in [`../stage-hosting.md`](../stage-hosting.md) for the account owner to
+run separately.
+
+The account owner has since run that cutover, and the Worker now builds from
+this repository. This section records only what the migration itself did;
+[`../stage-hosting.md`](../stage-hosting.md) is the current state of the
+connection.
