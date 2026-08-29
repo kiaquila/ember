@@ -183,7 +183,7 @@ test("both favicon fallbacks are declared", () => {
 });
 
 test("the wordmark stays two words for a screen reader", () => {
-  /* The gold dot is decorative; without a separator the mark fuses into one
+  /* The brand dot is decorative; without a separator the mark fuses into one
      announced word. The portfolio pins the same property. */
   const mark = page.match(/<strong>[\s\S]*?<\/strong>/)[0];
   assert.match(mark, /aria-hidden="true"/);

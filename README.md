@@ -26,9 +26,11 @@ synthesized with the Web Audio API, no audio files).
   cycle was dropped the same day); controls are
   limited to play/stop and mute; the favicon is the wireframe ball with an
   inverted palette for dark color schemes plus PNG fallbacks for Safari; the
-  wordmark is "ks·design" — tracked caps with the brand-gold dot on the
-  baseline, hugging the KS with a wide gap before DESIGN (`#e8a038`, shared
-  with the ks portfolio) — used in the header only; the footer credit stays plain
+  wordmark is "ks·design" — tracked caps with the cornflower gradient dot on
+  the baseline, hugging the KS with a wide gap before DESIGN (indigo `#818cf8`
+  into cyan `#22d3ee` at 135°, shared with the ks portfolio's `--brand-dot`;
+  it replaced the flat brand-gold `#e8a038` on 2026-08-28) — used in the
+  header only; the footer credit stays plain
   text: "Designed by ks-design · Built with AI workflows", linking to
   <https://ks-design.art>.
 
