@@ -27,7 +27,9 @@
     --muted: #807b72;
     --line: rgba(42, 39, 34, 0.18);
     --gold: #b07f2f;
-    --gold-dot: #e8a038;
+    --brand-dot-a: #818cf8;
+    --brand-dot-b: #22d3ee;
+    --brand-dot: linear-gradient(135deg, var(--brand-dot-a), var(--brand-dot-b));
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; }
@@ -68,7 +70,7 @@
     color: var(--muted);
   }
   .tag strong { color: var(--ink); font-weight: 600; }
-  /* The gold dot is decorative, so the wordmark needs a real separator in the
+  /* The brand dot is decorative, so the wordmark needs a real separator in the
      accessible name — without it the mark is announced as one word. */
   .visually-hidden {
     position: absolute;
@@ -88,7 +90,7 @@
     width: 0.42em;
     height: 0.42em;
     border-radius: 50%;
-    background: var(--gold-dot);
+    background: var(--brand-dot);
     margin: 0 0.3em 0 -0.07em;
   }
   .bottom {

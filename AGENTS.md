@@ -65,9 +65,11 @@ tags are not guaranteed to be semantic versions.
   back the endless cycle repeat without the client asking); controls are
   play/stop and mute only; the
   favicon (inline SVG data URI + PNG fallbacks) inverts for dark color
-  schemes; the wordmark is "ks·design" in tracked caps with the brand-gold
-  dot on the baseline, hugging the KS with a wide gap before DESIGN
-  (`--gold-dot: #e8a038`, same value as the ks portfolio's `--brand-gold`) — header only,
+  schemes; the wordmark is "ks·design" in tracked caps with the cornflower
+  gradient dot on the baseline, hugging the KS with a wide gap before DESIGN
+  (`--brand-dot`, indigo `#818cf8` into cyan `#22d3ee` at 135°, same pair as
+  the ks portfolio's `--brand-dot`; the client swapped it in for the flat
+  brand-gold `#e8a038` on 2026-08-28) — header only,
   while the footer credit stays plain "ks-design" text; the centered footer
   credit links to <https://ks-design.art>.
 - Audio must remain gesture-gated (autoplay policy) and fully silenced by
