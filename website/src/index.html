@@ -399,8 +399,19 @@
   var resumeEpoch = 0;
   var lastHoverStrike = -10;
 
+  // iOS routes Web Audio through the "ambient" audio session, which the
+  // ring/silent switch mutes outright even after a gesture unlock (native
+  // apps and <audio> keep playing). Declaring playback intent exempts the
+  // fork; browsers without the Audio Session API keep today's behavior.
+  try {
+    if ("audioSession" in navigator) navigator.audioSession.type = "playback";
+  } catch (e) {}
+
   function ensureAudio() {
-    if (AC) { if (AC.state === "suspended") AC.resume().catch(function () {}); return; }
+    // Not just "suspended": iOS parks the context in a non-standard
+    // "interrupted" state after a call or backgrounding, and only a resume
+    // brings it back.
+    if (AC) { if (AC.state !== "running") AC.resume().catch(function () {}); return; }
     var Ctor = window.AudioContext || window.webkitAudioContext;
     if (!Ctor) return;
     AC = new Ctor();
@@ -491,7 +502,14 @@
       [1.0, 1.0, 10.0],
       [1.002, 0.45, 9.0],
       [2.0, 0.08, 3.0],
-      [0.5, 0.18, 7.0]
+      [0.5, 0.18, 7.0],
+      // Phone speakers roll off steeply below ~250 Hz, which erases the
+      // 136 Hz body outright; these quiet upper partials (harmonics plus a
+      // fork's fast-decaying ~6.27x clang mode) carry the same perceived
+      // pitch there, and sit far under the fundamental on full-range output.
+      [3.0, 0.1, 4.0],
+      [4.0, 0.05, 3.0],
+      [6.27, 0.06, 1.5]
     ];
     for (var i = 0; i < partials.length; i++) {
       var ratio = partials[i][0], amp = partials[i][1], dec = partials[i][2];
