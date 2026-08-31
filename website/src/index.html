@@ -398,9 +398,24 @@
   var audioUnlocked = false;
   var resumeEpoch = 0;
   var lastHoverStrike = -10;
+  // Touch-only devices are where built-in speakers cannot reproduce the
+  // 136 Hz body; a phone on headphones also matches, where the extra
+  // harmonics stay a subtle warmth.
+  var smallSpeakers = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+
+  // iOS routes Web Audio through the "ambient" audio session, which the
+  // ring/silent switch mutes outright even after a gesture unlock (native
+  // apps and <audio> keep playing). Declaring playback intent exempts the
+  // fork; browsers without the Audio Session API keep today's behavior.
+  try {
+    if ("audioSession" in navigator) navigator.audioSession.type = "playback";
+  } catch (e) {}
 
   function ensureAudio() {
-    if (AC) { if (AC.state === "suspended") AC.resume().catch(function () {}); return; }
+    // Not just "suspended": iOS parks the context in a non-standard
+    // "interrupted" state after a call or backgrounding, and only a resume
+    // brings it back.
+    if (AC) { if (AC.state !== "running") AC.resume().catch(function () {}); return; }
     var Ctor = window.AudioContext || window.webkitAudioContext;
     if (!Ctor) return;
     AC = new Ctor();
@@ -493,6 +508,18 @@
       [2.0, 0.08, 3.0],
       [0.5, 0.18, 7.0]
     ];
+    if (smallSpeakers) {
+      // Phone and tablet speakers roll off steeply below ~250 Hz, which
+      // erases the 136 Hz body outright, so touch devices get the octave
+      // pair alone as the body — the lowest note the speaker can actually
+      // reproduce, with the fork's slow beating and a long tail. Nothing
+      // brighter: on these speakers even a quiet 3rd harmonic, let alone an
+      // inharmonic clang partial, reads as a ringing note (client-tuned
+      // darker twice, 2026-08-31). Full-range playback keeps the approved
+      // recipe above untouched.
+      partials.push([2.0, 0.2, 7.5]);
+      partials.push([2.004, 0.09, 6.5]);
+    }
     for (var i = 0; i < partials.length; i++) {
       var ratio = partials[i][0], amp = partials[i][1], dec = partials[i][2];
       var o = AC.createOscillator();
