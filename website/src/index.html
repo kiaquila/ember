@@ -510,16 +510,15 @@
     ];
     if (smallSpeakers) {
       // Phone and tablet speakers roll off steeply below ~250 Hz, which
-      // erases the 136 Hz body outright, so touch devices get soft harmonic
-      // support that carries the pitch via the missing fundamental. The
-      // octave (with the fork's slow beating and a long tail) is the body —
-      // it is the lowest note the speaker can actually reproduce — and the
-      // 3rd harmonic stays a faint pitch cue only: anything brighter, or an
-      // inharmonic clang partial, reads as a separate ringing note. Full-
-      // range playback keeps the approved recipe above untouched.
-      partials.push([2.0, 0.18, 7.0]);
-      partials.push([2.004, 0.08, 6.0]);
-      partials.push([3.0, 0.04, 3.5]);
+      // erases the 136 Hz body outright, so touch devices get the octave
+      // pair alone as the body — the lowest note the speaker can actually
+      // reproduce, with the fork's slow beating and a long tail. Nothing
+      // brighter: on these speakers even a quiet 3rd harmonic, let alone an
+      // inharmonic clang partial, reads as a ringing note (client-tuned
+      // darker twice, 2026-08-31). Full-range playback keeps the approved
+      // recipe above untouched.
+      partials.push([2.0, 0.2, 7.5]);
+      partials.push([2.004, 0.09, 6.5]);
     }
     for (var i = 0; i < partials.length; i++) {
       var ratio = partials[i][0], amp = partials[i][1], dec = partials[i][2];
