@@ -105,7 +105,7 @@ export function latestCodexNativeReviewResult(reviews = [], reviewComments = [],
 }
 
 /** Codex reports "no findings" as a plain comment rather than a review, so
-    that shape is accepted too — but only for this head and only after the
+    that shape is accepted too - but only for this head and only after the
     request it answers. */
 export function isAcceptableCodexSummaryComment(comment, headSha, requestedAt, requestCommentId) {
   const body = String(comment?.body || "");

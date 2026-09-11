@@ -3,7 +3,7 @@
 
    It is deliberately small: Ember is one page, one Worker and a handful of
    scripts, so the guard checks the few things that would actually hurt if
-   they landed — generated output or a credential committed by accident, a
+   they landed - generated output or a credential committed by accident, a
    symbolic link, and a workflow that could hand its token to a pull request.
    Anything beyond that is left to review; a policy engine would be more code
    than the project it guards.
@@ -18,7 +18,7 @@ import { spawnSync } from "node:child_process";
 
 import { parse } from "yaml";
 
-/** Directories that are built, installed or cached — never committed. */
+/** Directories that are built, installed or cached - never committed. */
 const GENERATED_DIRECTORIES = new Set([
   ".wrangler",
   "coverage",
@@ -93,7 +93,7 @@ export function checkRepository(root, files = trackedFiles(root)) {
     if (!stat.isFile() || stat.size > MAX_SCANNED_BYTES) continue;
 
     const buffer = readFileSync(path);
-    /* A NUL byte in the head means binary — og.png and the favicons land
+    /* A NUL byte in the head means binary - og.png and the favicons land
        here, and base64 pixel data would match the patterns below. */
     if (buffer.subarray(0, Math.min(buffer.length, 8192)).includes(0)) continue;
     const text = buffer.toString("utf8");
@@ -124,7 +124,7 @@ export function checkRepository(root, files = trackedFiles(root)) {
 
 /* GitHub reads a workflow file from one of two places. `issue_comment`,
    `pull_request_review`, `schedule` and `workflow_run` always run the default
-   branch's copy, so a branch cannot rewrite them — which is why the
+   branch's copy, so a branch cannot rewrite them - which is why the
    review-rerun workflow may hold `actions: write`. `pull_request` and
    `workflow_dispatch` run the copy on the ref being proposed or selected, and
    `push` runs the copy in the commit that was pushed; in those, a write grant
@@ -142,8 +142,8 @@ const BRANCH_CONTROLLED_TRIGGERS = new Set([
 const DEFAULT_BRANCH = "main";
 
 /* Workflows are parsed rather than pattern-matched. Reading them line by line
-   invites a long tail of valid YAML spellings the reader does not know —
-   a quoted key, a flow-style step map — each of which is a hole rather than a
+   invites a long tail of valid YAML spellings the reader does not know -
+   a quoted key, a flow-style step map - each of which is a hole rather than a
    cosmetic miss, so the guard uses the same YAML the runner does. */
 function triggerNames(on) {
   if (typeof on === "string") return [on];
@@ -167,7 +167,7 @@ function pushRestrictedToDefaultBranch(on) {
   if (!push || typeof push !== "object") return false;
   /* A `branches` filter alone means tag pushes do not fire the workflow. A
      `tags` filter turns them back on, and a tag push runs the tagged commit's
-     copy — branch-controlled again. `tags-ignore` only re-admits the tags it
+     copy - branch-controlled again. `tags-ignore` only re-admits the tags it
      does not name, so it is safe when it excludes every one of them. */
   if ("tags" in push) return false;
   if ("tags-ignore" in push && !excludesEveryTag(push["tags-ignore"])) return false;
@@ -246,7 +246,7 @@ export function checkWorkflow(name, text) {
     failures.push(`Workflow may not use write-all: ${name}`);
   }
   /* A branch-controlled workflow may not hold any write scope, however it is
-     spelled — `write-all` is only the loudest version of the same grant. */
+     spelled - `write-all` is only the loudest version of the same grant. */
   const branchControlled = branchControlledTriggers(on);
   if (branchControlled.length > 0 && grants.some((grant) => grant === "write" || grant === "write-all")) {
     failures.push(
@@ -307,8 +307,8 @@ const ACTOR_CONTROLLED_REF = [
   /github\.event\.(?:issue|comment|pull_request|client_payload|workflow_run)\b/
 ];
 
-/* `if:` routes a job or step without fetching anything — it is where the
-   review-rerun workflow legitimately tests `github.event.comment` — and
+/* `if:` routes a job or step without fetching anything - it is where the
+   review-rerun workflow legitimately tests `github.event.comment` - and
    `name:` is a label. Both are skipped only where they mean that: as a key of
    a job or a step. The same words nested inside a value, `strategy.matrix.name`
    or a `with.name` input, are data that can still reach a checkout. */
@@ -325,7 +325,7 @@ function deepStrings(value) {
 /** Every string under a job or step that could decide what is run.
 
     The walk is what stops this rule from becoming a list of places a ref can
-    sit — env, step inputs, reusable-workflow inputs, `run`,
+    sit - env, step inputs, reusable-workflow inputs, `run`,
     `working-directory`, `strategy.matrix` and whatever GitHub adds next all
     reach it by default. */
 function executionInfluencingValues(node) {
@@ -361,7 +361,7 @@ function actorControlledRefs(workflow) {
 
 /* A tag or branch reference is mutable, so a compromised action would run here
    on the next push without any change landing in this repository. A local
-   `./` action is this repository's own reviewed code — but its manifest can
+   `./` action is this repository's own reviewed code - but its manifest can
    itself call out to a mutable action, which is why checkActionManifest below
    holds those to the same rule. */
 function unpinnedActions(name, references) {

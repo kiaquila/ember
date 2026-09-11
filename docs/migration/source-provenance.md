@@ -14,7 +14,7 @@ were carried over by `git filter-repo` and then proved against the source.
 | Source subtree | `ember/` |
 | Source subtree tree object | `d813adb9d9e5794e4f9d73d74b68cc00a8e73ce6` |
 | Rewritten `main` | `ca149515a25da1bb218273c9ff4c993926ecebc6` |
-| Tags | none — the source project carried no tag |
+| Tags | none - the source project carried no tag |
 
 ## How the history was rewritten
 
@@ -26,8 +26,8 @@ along:
 git filter-repo --path ember/ --path-rename ember/:
 ```
 
-The rename lifts `ember/website` to `website` and the two project documents —
-`README.md` and `AGENTS.md` — to the repository root, which is the only topology
+The rename lifts `ember/website` to `website` and the two project documents -
+`README.md` and `AGENTS.md` - to the repository root, which is the only topology
 change the history rewrite makes.
 
 ## Proof taken before any migration edit
@@ -36,7 +36,7 @@ All four checks were run on the filtered clone, before the baseline or any
 adaptation was committed.
 
 1. **Exact tree.** The root tree of the rewritten `main` is
-   `d813adb9d9e5794e4f9d73d74b68cc00a8e73ce6` — the same tree object the source
+   `d813adb9d9e5794e4f9d73d74b68cc00a8e73ce6` - the same tree object the source
    repository published under `ember/` at
    `3b99cb3d23328013c28eb73ab8525b13b6992d9e`. All 15 files are therefore
    byte-identical to the source, not merely equivalent.
@@ -55,7 +55,7 @@ adaptation was committed.
    143 upstream commits and pruned the 141 that never touched `ember/`.
 3. **No stray refs.** Only `main` was pushed. The source repository's one tag,
    `chaijana-iteration-01`, belongs to another project and was pruned by the
-   rewrite — `ref-map` records it as deleted — so no tag was carried over.
+   rewrite - `ref-map` records it as deleted - so no tag was carried over.
 4. **Object integrity.** `git fsck --full --strict` reports no problem.
 
 ### The uncommitted `make-og.mjs` was not carried over
@@ -93,8 +93,8 @@ The proof is the same tree object as above, and, for that one file, the blob:
 ## Commit map
 
 `git filter-repo` wrote a full old→new commit map for all 143 rewritten
-commits. It is not committed — it describes the migration event, not the
-product — and is kept locally at
+commits. It is not committed - it describes the migration event, not the
+product - and is kept locally at
 `~/projects/web-design/.claude/migration/ember-2026-08-21/`:
 
 | File | SHA-256 |
@@ -139,7 +139,7 @@ they were.
   the reduced-motion handling, the favicons and the Worker's inline-source CSP
   exception all carry over unchanged.
 
-## Repository checks — borrowed by hand
+## Repository checks - borrowed by hand
 
 The checks in this repository were copied from the `kiaquila/web-design`
 template at commit `ea8501fdb90236fcb891e97b15f7a42a62f76ff1` and then reduced
@@ -147,7 +147,7 @@ to what this project needs: `scripts/check-repository.mjs` keeps the tracked-fil
 secret, symlink and workflow rules and drops the policy engine around them, and
 the Codex review gate keeps its trust model and drops the marker comment and the
 second dispatching workflow. The guard reads workflows with a YAML parser rather
-than the template's line patterns — the repository root's one dependency — so a
+than the template's line patterns - the repository root's one dependency - so a
 quoted key or a flow-style step map cannot slip a rule.
 
 **This is a one-time manual borrowing, not an installation.** No baseline lock
@@ -163,7 +163,7 @@ exceeds by design. The four published files are budgeted individually in
 `website/tests/site.test.mjs` from their measured sizes instead, and `og.png`
 keeps the 1 MiB limit this project already had.
 
-## Cloudflare — prepared, not switched
+## Cloudflare - prepared, not switched
 
 Nothing in Cloudflare was changed during this migration. When this repository
 was created the Worker `ember` still built from `kiaquila/web-design` at root

@@ -9,8 +9,8 @@ or committed here.
 
 The page is one self-contained HTML file, so its build copies rather than
 compiles: [`website/scripts/build.mjs`](../website/scripts/build.mjs) assembles
-`dist/` from `src/` — exactly `index.html`, `favicon-32.png`,
-`apple-touch-icon.png` and `og.png` — and fails if the page ever gains an
+`dist/` from `src/` - exactly `index.html`, `favicon-32.png`,
+`apple-touch-icon.png` and `og.png` - and fails if the page ever gains an
 off-origin reference, loses a favicon, references a file the build does not
 publish, or if `src/` grows a fifth file.
 
@@ -41,7 +41,7 @@ headers are attached to every response, `html_handling:
 which serves the one page for any unknown path.
 
 The custom domain is bound to the Worker in Cloudflare, not to the Git
-connection. Changing which repository builds this Worker does not touch it —
+connection. Changing which repository builds this Worker does not touch it -
 which is exactly why the cutover below reused this Worker rather than creating
 a second one.
 
@@ -52,7 +52,7 @@ absolute URLs are the only ones the build allows, and only as the complete
 another domain would therefore be a code change here, not just a dashboard
 change.
 
-## Current connection — this repository builds the Worker
+## Current connection - this repository builds the Worker
 
 **The cutover is done: the Worker `ember` builds from `kiaquila/ember`.** The
 Worker was created while the project lived in the `kiaquila/web-design`
@@ -76,12 +76,12 @@ them, and no Cloudflare credential is stored in GitHub.
 | Build command | `npm run build` |
 | Production deploy command | `npm run stage:deploy` |
 | Non-production deploy command | `npm run stage:preview` |
-| Included build watch path | default — this repository holds one project |
+| Included build watch path | default - this repository holds one project |
 
 `kiaquila/web-design` no longer builds this Worker. Its `ember/` source path is
 still present there, which is what keeps the full rollback below available.
 
-## Cutover to this repository — completed
+## Cutover to this repository - completed
 
 This is the procedure the account owner followed, kept as the record of the
 order it takes and as the procedure to repeat if the connection ever has to be
@@ -95,7 +95,7 @@ credentials live in Cloudflare.
 3. **Disconnect the existing Git connection** from `kiaquila/web-design` before
    connecting the new one. Two repositories must never be able to build the same
    Worker at the same time.
-4. Connect `kiaquila/ember` to the same Worker — do not create a second Worker,
+4. Connect `kiaquila/ember` to the same Worker - do not create a second Worker,
    and do not rename this one. Cloudflare requires the dashboard name to match
    `name` in `website/wrangler.json`, and the `ember.ks-design.art` custom
    domain is attached to this Worker.
@@ -114,7 +114,7 @@ every build, which is why it was cleared back to the default; narrowing it to
 ## Verify the stage
 
 - `https://ember.ks-design.workers.dev` and `https://ember.ks-design.art` both
-  return the study, and an unknown path returns the same page — the asset
+  return the study, and an unknown path returns the same page - the asset
   configuration is a single-page-application fallback, not a 404.
 - The security headers from `website/worker/index.ts` are present, including the
   Content-Security-Policy with `script-src 'self' 'unsafe-inline'`,
@@ -132,7 +132,7 @@ every build, which is why it was cleared back to the default; narrowing it to
 
 ## Rollback
 
-- **Fastest:** in Cloudflare, roll the Worker back to an earlier version —
+- **Fastest:** in Cloudflare, roll the Worker back to an earlier version -
   including the pre-cutover version id recorded in step 1. That restores a
   previously served build without any Git change, and the custom domain follows
   it because it is bound to the Worker.
@@ -148,6 +148,6 @@ every build, which is why it was cleared back to the default; narrowing it to
 `ember / stage` GitHub environment. Now that this repository owns the Worker,
 that entry describes a stage the monorepository no longer builds. Removing it
 is the account owner's next step there: its own pull request in that
-repository, following its documented procedure for retiring a stage — and the
+repository, following its documented procedure for retiring a stage - and the
 project source and history stay in place, both as history and as the full
 rollback route above.

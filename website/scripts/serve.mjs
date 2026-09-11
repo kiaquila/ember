@@ -20,7 +20,7 @@ async function resolveFile(pathname) {
   try {
     /* Decoding belongs inside the guard: a malformed escape like `/%` throws
        a URIError, which outside it would take the whole preview down. A bad
-       path and a missing file mean the same thing here — nothing to serve. */
+       path and a missing file mean the same thing here - nothing to serve. */
     const relative = normalize(decodeURIComponent(pathname)).replace(/^(\.\.[/\\])+/, "");
     const candidate = join(dist, relative);
     if (!candidate.startsWith(dist)) return null;
@@ -39,7 +39,7 @@ createServer(async (request, response) => {
   const file = await resolveFile(url.pathname);
   if (!file) {
     /* The build publishes exactly the page and its two favicons, so there is
-       no 404 document to stream — reading one would crash the preview. */
+       no 404 document to stream - reading one would crash the preview. */
     response.writeHead(404, { "content-type": TYPES[".txt"] });
     response.end(`Not found: ${url.pathname}\n`);
     return;

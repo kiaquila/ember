@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* Static build. The study is one self-contained HTML file plus the two baked
    favicon PNGs Safari needs and the baked social card, so the build copies
-   rather than compiles — and then checks the two properties the project
+   rather than compiles - and then checks the two properties the project
    promises, because a page that quietly grew a CDN link or lost its favicon
    would still "build" fine.
 
@@ -35,11 +35,11 @@ const META_OWN_ORIGIN = new RegExp(
 );
 
 /* The page must stay dependency-free: nothing fetched from another origin.
-   Enumerating the mechanisms that can pull bytes — element `src`, `srcset`,
-   `poster`, `<link href>`, CSS `url()` and `@import` — is a losing game, so
+   Enumerating the mechanisms that can pull bytes - element `src`, `srcset`,
+   `poster`, `<link href>`, CSS `url()` and `@import` - is a losing game, so
    the check inverts it: the one thing allowed to point outward is an
    anchor's href, and once exactly that attribute is blanked no off-origin
-   reference may remain anywhere in the document — an anchor's other
+   reference may remain anywhere in the document - an anchor's other
    attributes (an inline background, a `ping`) stay visible to the scan.
    Data URIs are stripped first because their payload is inert and base64
    happily contains `//`. Character references are decoded before any of it,
@@ -62,7 +62,7 @@ function decodeCharacterReferences(markup) {
 const DATA_URI = /data:[^"'\s)]+/gi;
 const ANCHOR_HREF = /(<a\b[^>]*?\bhref\s*=\s*)(["'])[^"']*\2/gi;
 /* Two shapes of an off-origin reference: anything with `//`, and a special
-   scheme written without slashes — browsers normalise `http:cdn.example` to
+   scheme written without slashes - browsers normalise `http:cdn.example` to
    `http://cdn.example`, so the scheme alone is enough to leave the site. */
 const OFF_ORIGIN_ANYWHERE =
   /(?:\b(?:https?|ftp|wss?):[^\s"'()<>]+)|(?:(?:[a-z][a-z0-9+.-]*:)?\/\/[^\s"'()<>]+)/gi;

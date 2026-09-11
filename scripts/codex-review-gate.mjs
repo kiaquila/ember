@@ -5,7 +5,7 @@
    Codex review for *this exact head* exists and came back clean. The chain is
    deliberately short: a trusted human comments "@codex review <full head
    sha>", Codex answers, and this gate reads that answer. There is no marker
-   comment and no second dispatching workflow — the human comment is the
+   comment and no second dispatching workflow - the human comment is the
    record, and rerunning this run is what re-reads it. */
 
 import { appendFileSync } from "node:fs";

@@ -23,8 +23,8 @@ const BASELINE_HEADERS: Record<string, string> = {
 };
 
 /**
- * The page is one self-contained file by design — its stylesheet and its
- * canvas program are inline — so `style-src` and `script-src` have to allow
+ * The page is one self-contained file by design - its stylesheet and its
+ * canvas program are inline - so `style-src` and `script-src` have to allow
  * inline sources here, unlike the sibling projects that ship separate files.
  * Everything else stays shut: the study fetches nothing, renders no input and
  * stores nothing, so there is no injection surface for the allowance to widen.
