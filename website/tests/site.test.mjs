@@ -34,8 +34,8 @@ test("the study ships as one page, its two favicons and the social card", async 
 
    Four files ship, so they are simply listed: a configurable budget system
    would be more machinery than the thing it measures. The limits are round
-   numbers a little above what the build actually produces — measured from
-   `npm --prefix website run check` on 2026-08-25 — so ordinary edits pass
+   numbers a little above what the build actually produces - measured from
+   `npm --prefix website run check` on 2026-08-25 - so ordinary edits pass
    and a runaway does not:
 
      index.html            35,097 B  ->  40 KiB  (~17% headroom)
@@ -47,7 +47,7 @@ test("the study ships as one page, its two favicons and the social card", async 
    that file (client-approved pixels), and the deterministic in-script deflate
    trades ~25% size against zlib level 9 for byte-stable output.
 
-   A file that outgrows its budget is a decision, not an accident — raise the
+   A file that outgrows its budget is a decision, not an accident - raise the
    number here deliberately, with the new measurement. */
 const BUDGETS = {
   "index.html": 40 * 1024,
@@ -77,7 +77,7 @@ test("nothing is loaded from another origin", () => {
 test("the social card is declared and matches what ships", async () => {
   /* Scrapers need absolute URLs, so these are the one place the page names
      its own origin. The image the tags promise has to be the file the build
-     publishes, at the size the tags claim — a scraper caches whatever it
+     publishes, at the size the tags claim - a scraper caches whatever it
      finds, and a mismatch would live on in other people's feeds. Every
      number is pinned literally so the tags and the file cannot drift in
      lockstep unnoticed. */
@@ -162,7 +162,7 @@ test("the social card was rendered from the page's current figure geometry", asy
   assert.equal(
     baked[FIGURE_FINGERPRINT_KEY],
     figureFingerprint(page),
-    "og.png was rendered from different figure code — update the port in " +
+    "og.png was rendered from different figure code - update the port in " +
       "scripts/make-og.mjs to match the page, then regenerate (see " +
       "PORTED_FIGURE_FINGERPRINT there)"
   );
@@ -171,7 +171,7 @@ test("the social card was rendered from the page's current figure geometry", asy
   assert.equal(
     baked[RENDERER_FINGERPRINT_KEY],
     rendererFingerprint(join(root, "scripts")),
-    "og.png predates the current renderer — run `npm run og`"
+    "og.png predates the current renderer - run `npm run og`"
   );
 });
 
@@ -231,7 +231,7 @@ test("the Worker attaches security headers to the assets", () => {
   ]) {
     assert.ok(worker.includes(header), `the Worker does not set ${header}`);
   }
-  /* The page is deliberately one file, so inline sources are allowed — but
+  /* The page is deliberately one file, so inline sources are allowed - but
      only those. A policy that also opened up an origin would defeat the build
      check that keeps the study self-contained. */
   assert.match(worker, /"default-src 'self'"/);

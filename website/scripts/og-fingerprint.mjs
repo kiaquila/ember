@@ -6,10 +6,10 @@
    feed. This fingerprint is the tripwire, applied twice. make-og.mjs bakes
    the hash of the page's figure-geometry section into a tEXt chunk of
    og.png, and the tests recompute it from the shipped page and fail on a
-   mismatch — so a changed page with a stale card is a red build. And
+   mismatch - so a changed page with a stale card is a red build. And
    make-og.mjs itself refuses to render while the page hash disagrees with
-   PORTED_FIGURE_FINGERPRINT — the hash its hand-ported code was written
-   against — so rerunning it cannot quietly bless a stale render either.
+   PORTED_FIGURE_FINGERPRINT - the hash its hand-ported code was written
+   against - so rerunning it cannot quietly bless a stale render either.
 
    Only the geometry section is hashed, on purpose: palette or motion tweaks
    elsewhere in the page change how the live study moves, not what shape the

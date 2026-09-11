@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ember Study — ks-design lab</title>
-<meta name="description" content="An interactive study: a wireframe figure smolders under the cursor, burns down on play, and reassembles — scored by a deep meditative tuning fork.">
-<meta property="og:title" content="Ember Study — ks-design lab">
-<meta property="og:description" content="An interactive study: a wireframe figure smolders under the cursor, burns down on play, and reassembles — scored by a deep meditative tuning fork.">
+<title>Ember Study | ks-design lab</title>
+<meta name="description" content="An interactive study: a wireframe figure smolders under the cursor, burns down on play, and reassembles to a deep meditative tuning fork.">
+<meta property="og:title" content="Ember Study | ks-design lab">
+<meta property="og:description" content="An interactive study: a wireframe figure smolders under the cursor, burns down on play, and reassembles to a deep meditative tuning fork.">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="ks-design lab">
 <meta property="og:locale" content="en_US">
@@ -71,7 +71,7 @@
   }
   .tag strong { color: var(--ink); font-weight: 600; }
   /* The brand dot is decorative, so the wordmark needs a real separator in the
-     accessible name — without it the mark is announced as one word. */
+     accessible name - without it the mark is announced as one word. */
   .visually-hidden {
     position: absolute;
     width: 1px;
@@ -82,7 +82,7 @@
     clip-path: inset(50%);
     white-space: nowrap;
   }
-  /* The dot sits nearer the KS than the DESIGN in a strict 1:2 proportion —
+  /* The dot sits nearer the KS than the DESIGN in a strict 1:2 proportion -
      0.15em after the S, 0.30em before the D. The tag's 0.22em letter-spacing
      already pads the left side, so the left margin only trims it back. */
   .dot {
@@ -164,11 +164,11 @@
 
 <header class="chrome top">
   <span class="tag"><strong>ks<i class="dot" aria-hidden="true"></i><span class="visually-hidden"> </span>design</strong> · lab</span>
-  <span class="tag">study 01 — ember</span>
+  <span class="tag">study 01 · ember</span>
 </header>
 
 <div class="chrome bottom">
-  <p class="hint" id="hint">hover to smolder — play to burn it down</p>
+  <p class="hint" id="hint">hover to smolder · play to burn it down</p>
   <div class="controls">
     <button id="playBtn" class="ctl" aria-label="Play the burn cycle" aria-pressed="false" title="Play">
       <svg class="main" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -378,7 +378,7 @@
   }
 
   function resize() {
-    // minimized/hidden windows can report 0×0 — keep the last real layout
+    // minimized/hidden windows can report 0×0 - keep the last real layout
     if (!window.innerWidth || !window.innerHeight) return;
     DPR = Math.min(window.devicePixelRatio || 1, 2);
     W = window.innerWidth;
@@ -481,7 +481,7 @@
     if (!AC) return;
     opts = opts || {};
     // The context is created on the first pointer move and stays suspended
-    // until a gesture resumes it — and resuming is asynchronous, so a strike
+    // until a gesture resumes it - and resuming is asynchronous, so a strike
     // issued in the same tick as the Play click would be dropped and the first
     // burn would be silent. Only the gesture's own strike waits for the resume:
     // a hover strike queued while suspended would otherwise fire later beside
@@ -511,7 +511,7 @@
     if (smallSpeakers) {
       // Phone and tablet speakers roll off steeply below ~250 Hz, which
       // erases the 136 Hz body outright, so touch devices get the octave
-      // pair alone as the body — the lowest note the speaker can actually
+      // pair alone as the body - the lowest note the speaker can actually
       // reproduce, with the fork's slow beating and a long tail. Nothing
       // brighter: on these speakers even a quiet 3rd harmonic, let alone an
       // inharmonic clang partial, reads as a ringing note (client-tuned
@@ -712,7 +712,7 @@
     } else if (phase === "gone") {
       if (phaseT > 1.4) {
         // rebirth: a fresh silhouette reassembles from the ash (client
-        // decision 2026-08-26 — the cycle runs once and ends in a new figure)
+        // decision 2026-08-26 - the cycle runs once and ends in a new figure)
         buildFigure();
         for (var rb = 0; rb < N; rb++) burn[rb] = 1;
         setPhase("restoring");
@@ -730,13 +730,13 @@
         if (burn[r2] > maxB) maxB = burn[r2];
       }
       if (maxB < 0.02) {
-        // the single cycle is complete — hand the control back to Play
+        // the single cycle is complete - hand the control back to Play
         if (playing) resetPlayButton();
         setPhase("idle");
       }
     }
 
-    // fire spread along edges — ash (burned-out nodes) no longer radiates
+    // fire spread along edges - ash (burned-out nodes) no longer radiates
     var spread = (phase === "burning") ? 1.3 : 0.25;
     for (var e = 0; e < edges.length; e++) {
       var ea = edges[e][0], eb = edges[e][1];
@@ -866,7 +866,7 @@
       ctx.globalCompositeOperation = "source-over";
     }
 
-    // edges — cold ones batched by alpha bucket, hot ones individual
+    // edges - cold ones batched by alpha bucket, hot ones individual
     var buckets = [[], [], [], [], [], []];
     var hotEdges = [];
     for (var e = 0; e < edges.length; e++) {

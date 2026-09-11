@@ -249,7 +249,7 @@ test("an inline permission map is a grant like any other", () => {
 
 test("push counts as branch-controlled unless it is pinned to the trusted branch", () => {
   /* A push workflow runs the pushed commit's own copy, so any branch that
-     can be pushed can rewrite it — unless the filter excludes every branch
+     can be pushed can rewrite it - unless the filter excludes every branch
      but the trusted one. */
   const write = ["permissions:", "  actions: write"].join("\n");
   const unfiltered = ["on:", "  push:", write].join("\n");
@@ -271,7 +271,7 @@ test("push counts as branch-controlled unless it is pinned to the trusted branch
   assert.deepEqual(checkWorkflow("pinned-inline.yml", pinnedInline), []);
 
   /* A `branches` filter alone keeps tag pushes from firing at all, but naming
-     any tag filter turns them back on — and a tag push runs the tagged
+     any tag filter turns them back on - and a tag push runs the tagged
      commit's copy, which anyone able to push a tag controls. */
   const tagged = ["on:", "  push:", "    branches: [main]", "    tags: ['*']", write].join("\n");
   assert.match(checkWorkflow("tagged.yml", tagged).join("\n"), /branch-controlled trigger \(push\)/);
@@ -285,7 +285,7 @@ test("push counts as branch-controlled unless it is pinned to the trusted branch
 
 test("a write-capable workflow may not name an actor-controlled ref", () => {
   /* A trusted event runs the default branch's workflow file, so the file is
-     trusted — but the code it checks out need not be. */
+     trusted - but the code it checks out need not be. */
   const pinned = `actions/checkout@${"a".repeat(40)}`;
   const checkout = [
     "on:",
@@ -307,7 +307,7 @@ test("a write-capable workflow may not name an actor-controlled ref", () => {
   );
 
   /* The shell can fetch one too, so enumerating checkout actions is not
-     enough — the ref itself is what is banned. */
+     enough - the ref itself is what is banned. */
   const viaCli = [
     "on:",
     "  issue_comment:",
@@ -327,7 +327,7 @@ test("a write-capable workflow may not name an actor-controlled ref", () => {
   assert.deepEqual(checkWorkflow("read.yml", readOnly), []);
 
   /* Parking the ref in an env value and expanding it later is the same
-     checkout, so env values count as well — at any level. */
+     checkout, so env values count as well - at any level. */
   const viaEnv = [
     "on:",
     "  issue_comment:",
@@ -448,7 +448,7 @@ test("a write-capable workflow may not name an actor-controlled ref", () => {
   ].join("\n");
   assert.deepEqual(checkWorkflow("routing.yml", routing), []);
 
-  /* `github.event.repository.*` is chosen by the repository, not an actor —
+  /* `github.event.repository.*` is chosen by the repository, not an actor -
      it is how the review-rerun workflow pins its trusted checkout. */
   const trusted = [
     "on:",
@@ -502,7 +502,7 @@ test("a merge-queue run is branch-controlled too", () => {
 
 test("a local action's own steps are pinned like a workflow's", () => {
   /* `uses: ./...` is skipped in a workflow because it is this repository's
-     reviewed code — but that manifest can call out to a mutable action, so
+     reviewed code - but that manifest can call out to a mutable action, so
      it is held to the same rule. */
   const composite = ["runs:", "  using: composite", "  steps:", "    - uses: owner/action@main"].join("\n");
   assert.match(

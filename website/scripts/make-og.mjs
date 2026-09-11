@@ -1,27 +1,27 @@
 #!/usr/bin/env node
-/* Renders src/og.png — the 1200×630 social card for the Ember study.
+/* Renders src/og.png - the 1200×630 social card for the Ember study.
 
    The figure is the page's own: buildFigure() and the draw pass from
    src/index.html are ported line for line (fibonacci-sphere shell, short
    edges capped at degree four, stray threads), so the card cannot drift away
    from what the study actually shows. The one deliberate departure: the lump
-   deformation is flattened (LUMP = 0), so the card reads as a clean sphere —
+   deformation is flattened (LUMP = 0), so the card reads as a clean sphere -
    the client picked this composition from ten candidates on 2026-08-20
    (variant 1: sphere, smolder at the upper right). The state is the approved
-   hover moment — a local smolder with gold shards rising — not the full
+   hover moment - a local smolder with gold shards rising - not the full
    burn, because the card has to read at thumbnail size.
 
    Wording is left to og:title and og:description, so nothing here needs a
    font: only the figure, the warm stage, and the small wireframe-ball mark
    (the favicon's exact geometry) in the corner.
 
-   Pure Node and fully seeded — a float framebuffer, supersampled 2× and
+   Pure Node and fully seeded - a float framebuffer, supersampled 2× and
    encoded as a PNG by hand, including the deflate stream itself (fixed
    Huffman + greedy LZ77, integer math only). Node's zlib is deliberately not
    used for compression: its byte stream differs between zlib builds (Node 22
    and Node 24+ ship different ones), which would leave the committed og.png
    dirty after a faithful `npm run og` on another runtime. With the encoder
-   in this file, the bytes depend on nothing but this file — reproducible on
+   in this file, the bytes depend on nothing but this file - reproducible on
    any Node the package supports. zlib is still imported, but only to verify
    the stream round-trips before the PNG is written.
 
@@ -78,7 +78,7 @@ if (pageFingerprint !== PORTED_FIGURE_FINGERPRINT) {
   );
 }
 
-/* ---- seeded PRNG (mulberry32) — the only source of randomness ---------- */
+/* ---- seeded PRNG (mulberry32) - the only source of randomness ---------- */
 let prngState = SEED >>> 0;
 function rand() {
   prngState = (prngState + 0x6d2b79f5) >>> 0;
@@ -249,8 +249,8 @@ const lumps = [];
 for (let k = 0; k < 5; k++) {
   lumps.push({
     ax: rnd(-2.4, 2.4), ay: rnd(-2.4, 2.4), az: rnd(-2.4, 2.4),
-    /* the rnd draw stays even at LUMP = 0 so the PRNG stream — and with it
-       every seeded variant — keeps the same layout as the candidate sheet */
+    /* the rnd draw stays even at LUMP = 0 so the PRNG stream - and with it
+       every seeded variant - keeps the same layout as the candidate sheet */
     ph: rnd(0, Math.PI * 2), amp: rnd(0.05, 0.13) * LUMP
   });
 }
@@ -670,6 +670,6 @@ const png = Buffer.concat([
 
 writeFileSync(OUT, png);
 console.log(
-  `Wrote ${join("src", "og.png")} — ${W}×${H}, ${edges.length} edges, ` +
+  `Wrote ${join("src", "og.png")} - ${W}×${H}, ${edges.length} edges, ` +
     `${(png.length / 1024).toFixed(0)} KB, figure ${pageFingerprint.slice(0, 12)}`
 );
