@@ -11,6 +11,6 @@
   },
   "description": "Ember: an interactive burn study for the ks·design lab",
   "devDependencies": {
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.1"
   }
 }
