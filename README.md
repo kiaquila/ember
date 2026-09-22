@@ -5,6 +5,8 @@ completely, and reassembles as a new silhouette to a synthesized 136.1 Hz
 tuning-fork tone.
 
 View the live work at [ember.ks-design.art](https://ember.ks-design.art).
+Current deployment settings, stage checks and the version rollback procedure
+are documented in [`docs/stage-hosting.md`](docs/stage-hosting.md).
 
 ## Implementation
 

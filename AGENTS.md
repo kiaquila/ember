@@ -47,8 +47,10 @@ ecosystem because action tags are not guaranteed to be semantic versions.
   free of off-origin references, so do not weaken that check. The Worker builds
   from this repository at root `website/`: the account owner ran the documented
   cutover, so `main` here deploys the stage and pull requests get a Cloudflare
-  preview build. The `ember/website` path in `kiaquila/web-design` no longer
-  builds this Worker and is kept only as the rollback route.
+  preview build. The former `ember/website` path in `kiaquila/web-design` has
+  been removed and is not a rollback route; recovery uses a known-good
+  Cloudflare Worker version after a fresh check of the active deployment, as
+  documented in the hosting runbook.
 - The motion references are the Pinterest pin <https://pin.it/163xR16nq> and
   <https://reactive-dots.vercel.app>. Treat them only as references for the
   smoldering particle motion and centered interaction layout. Do not copy

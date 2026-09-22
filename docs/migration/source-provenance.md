@@ -163,7 +163,7 @@ exceeds by design. The four published files are budgeted individually in
 `website/tests/site.test.mjs` from their measured sizes instead, and `og.png`
 keeps the 1 MiB limit this project already had.
 
-## Cloudflare - prepared, not switched
+## Cloudflare state at extraction - historical
 
 Nothing in Cloudflare was changed during this migration. When this repository
 was created the Worker `ember` still built from `kiaquila/web-design` at root
@@ -173,7 +173,23 @@ settings, the verification and the rollback-safe cutover order were written
 down in [`../stage-hosting.md`](../stage-hosting.md) for the account owner to
 run separately.
 
-The account owner has since run that cutover, and the Worker now builds from
-this repository. This section records only what the migration itself did;
-[`../stage-hosting.md`](../stage-hosting.md) is the current state of the
-connection.
+This section records only the state at the 2026-08-21 extraction. It is not the
+current deployment topology.
+
+## Later cutover and source retirement
+
+The account owner subsequently ran the documented cutover without replacing or
+renaming the Worker. The first production build from this repository was
+`2c5cd6e`, the merge of
+[pull request #5](https://github.com/kiaquila/ember/pull/5), and Cloudflare's
+`Workers Builds: ember` check completed successfully for it on 2026-08-27.
+
+On 2026-09-17, `kiaquila/web-design` commit
+[`cfae7bb`](https://github.com/kiaquila/web-design/commit/cfae7bb8236435579992ac265aead7d3b9d63a57)
+removed the migrated project copies, including `ember/`, and removed their
+stage registrations. That cleanup did not change this repository, the Worker,
+its version history or either public URL. The old monorepository is therefore
+provenance only, not a full rollback route.
+
+[`../stage-hosting.md`](../stage-hosting.md) is the current deployment record
+and rollback runbook.
