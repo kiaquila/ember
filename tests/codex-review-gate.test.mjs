@@ -359,6 +359,20 @@ test("new requests and clean receipts never hide existing findings", () => {
   assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command], reviews: [{ ...review, submitted_at: answeredAt }] })), "pass");
 });
 
+test("later clean reviews on the same head cannot clear body-only findings", () => {
+  const clean = { id: 8, commit_id: headSha, user: codexUser, state: "APPROVED", submitted_at: answeredAt };
+  for (const failure of [
+    { body: "P1 body-only finding", state: "COMMENTED" },
+    { body: "P3 context followed by P2 finding", state: "COMMENTED" },
+    { body: "Changes required", state: "CHANGES_REQUESTED" }
+  ]) {
+    const earlier = { ...clean, ...failure, id: 7, submitted_at: "2026-10-15T19:00:00Z" };
+    assert.equal(evaluateCodexReviewEvidence(evidence({ reviews: [earlier, clean] })), "fail");
+    assert.equal(evaluateCodexReviewEvidence(evidence({ reviews: [{ ...earlier, commit_id: "f".repeat(40) }, clean] })), "pass");
+    assert.equal(evaluateCodexReviewEvidence(evidence({ reviews: [{ ...earlier, user: { login: "someone" } }, clean] })), "pass");
+  }
+});
+
 function apiFixture({ moveHead = false, threadError = false, paginated = false, threads = [] } = {}) {
   let pullReads = 0;
   const calls = [];

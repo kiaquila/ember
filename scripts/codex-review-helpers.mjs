@@ -143,6 +143,9 @@ export function evaluateCodexReviewEvidence({ comments, reviews, reviewComments,
   if (threads.some((thread) => !thread.isResolved &&
       thread.comments.nodes.some((comment) => comment.author?.__typename === "Bot" &&
         comment.author.login === "chatgpt-codex-connector"))) return "fail";
+  /* Body-only findings have no resolvable thread. A later clean review or
+     request on the same tree cannot prove that their cause was fixed. */
+  if (reviews.some((review) => classifyCodexNativeReview(review, [], headSha) === "fail")) return "fail";
   if (latestCodexNativeReviewResult(reviews, reviewComments, headSha) === "fail") return "fail";
 
   const request = latestTrustedCodexReviewCommand(comments, headSha);
