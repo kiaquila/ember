@@ -272,7 +272,7 @@ const evidence = (overrides = {}) => ({
 
 test("real receipt and legacy answers pass, including native GitHub details", () => {
   for (const body of [legacyBody, receiptBody, receiptBody.replace(":rocket:", "Keep it up!"),
-    receiptBody.replace(":rocket:", "Hooray!"), receiptBody.replace(":rocket:", "Wonderful work!"),
+    receiptBody.replace(":rocket:", "Hooray!"),
     `${receiptBody}\n\n<details> <summary>ℹ️ About Codex in GitHub</summary>\n<br/>\n\nReviews are triggered when you comment \"@codex review\".\n</details>`]) {
     assert.equal(isAcceptableCodexSummaryComment(summaryComment(body), headSha, requestedAt, "10"), true);
     assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, summaryComment(body)] })), "pass");
@@ -292,6 +292,10 @@ test("receipts fail closed on stale, absent, ambiguous or conflicting evidence",
     `${receiptBody}\nP2: fix this bug`,
     receiptBody.replace(":rocket:", "However, review is incomplete."),
     receiptBody.replace(":rocket:", "But there are findings."),
+    receiptBody.replace(":rocket:", "More work is required."),
+    receiptBody.replace(":rocket:", "Awaiting verification."),
+    receiptBody.replace(":rocket:", "This result is provisional."),
+    receiptBody.replace(":rocket:", "Unrecognized decoration!"),
     receiptBody.replace("Didn't find any major issues.", "Found P1 issues."),
     receiptBody.replace("Didn't find any major issues.", "Review in progress."),
     `${stateBody}\n\n${receiptBody}`,

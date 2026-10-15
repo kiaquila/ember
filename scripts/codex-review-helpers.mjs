@@ -4,6 +4,7 @@
 
 const TRUSTED_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 const CODEX_REVIEW_LOGIN = "chatgpt-codex-connector[bot]";
+const POSITIVE_RECEIPT_SUFFIXES = new Set(["", ":rocket:", "keep it up!", "hooray!"]);
 
 function normalize(value) {
   return String(value || "").trim().toLowerCase();
@@ -117,9 +118,9 @@ export function isAcceptableCodexSummaryComment(comment, headSha, requestedAt, r
   if (!answer || (body.match(/<!-- codex-review-/gi) || []).length > 1 ||
       (body.match(/\*\*Reviewed commit:/gi) || []).length !== 1 ||
       containsBlockingCodexSeverity(body)) return false;
-  /* Native receipts vary their celebratory suffix (for example "Hooray!").
-     Preserve that legacy freedom without accepting a qualified verdict. */
-  if (/\b(?:but|however|except|not|no|pending|running|incomplete|unfinished|findings?|issues?|failed|failure|error)\b/i.test(answer[1])) return false;
+  /* Only observed positive decorations may qualify the explicit verdict.
+     Unknown prose must not turn a provisional answer into a passing gate. */
+  if (!POSITIVE_RECEIPT_SUFFIXES.has(normalize(answer[1]))) return false;
   const shortSha = String(headSha || "").slice(0, 10);
   const commentCreatedAt = Date.parse(comment?.created_at || "");
   const requestTime = Date.parse(requestedAt || "");
