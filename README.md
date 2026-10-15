@@ -31,3 +31,26 @@ website/
 ├── worker/index.ts      # security headers for static assets
 └── wrangler.json        # deployable Worker configuration
 ```
+
+## Codex review gate
+
+A trusted human requests native review with `@codex review <full-current-head-sha>`.
+`Codex Review` accepts the native connector's formal reviews or a clean legacy /
+`codex-review-receipt:v1` answer naming the current head's ten-character prefix.
+Receipts must be created after the exact-head request; editing an older answer
+cannot renew it. P0–P2 findings and every unresolved Codex review thread block
+success, even after another request. The gate rechecks HEAD after reading evidence.
+
+The rerun workflow reads trusted policy from the default branch and routes native
+formal reviews plus created/edited receipt and summary comments. The
+`codex-pull-request-review-summary` / `codex-review-state:v1` HTML is a wakeup
+signal only: neither its JSON, a Completed label nor a thumbs-up grants success.
+Reruns wait for an active gate and coalesce events already read by a later attempt.
+
+When this routing fix is itself under review, the default branch still has the
+old event filter. After the native connector posts a real current-head receipt,
+a maintainer can rerun the existing `Codex Review` Actions run with `gh run rerun
+<run-id> --repo kiaquila/ember`. The old trusted parser already accepts that
+receipt. This evaluates real review evidence using default-branch code; do not
+change checkout trust, fabricate a status, or merge around a failed gate. Once
+merged, subsequent native events use the corrected routing automatically.

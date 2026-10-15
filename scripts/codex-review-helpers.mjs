@@ -67,8 +67,7 @@ export function extractCodexPriority(body) {
 }
 
 export function containsBlockingCodexSeverity(body) {
-  const priority = extractCodexPriority(body);
-  return priority !== null && priority <= 2;
+  return /\bP[0-2]\b/i.test(String(body || ""));
 }
 
 /** "pass", "fail", or null when the review does not answer for this head. */
@@ -87,7 +86,7 @@ export function classifyCodexNativeReview(review, reviewComments = [], headSha) 
     /* An unlabelled finding is treated as blocking: the gate must not pass a
        comment it could not grade. */
     if (priorities.some((priority) => priority === null)) return "fail";
-    if (Math.min(...priorities) <= 2) return "fail";
+    if (commentsForReview.some((comment) => containsBlockingCodexSeverity(comment.body))) return "fail";
   }
 
   return review.state === "APPROVED" || review.state === "COMMENTED" ? "pass" : null;
@@ -108,7 +107,16 @@ export function latestCodexNativeReviewResult(reviews = [], reviewComments = [],
     that shape is accepted too - but only for this head and only after the
     request it answers. */
 export function isAcceptableCodexSummaryComment(comment, headSha, requestedAt, requestCommentId) {
-  const body = String(comment?.body || "");
+  const body = String(comment?.body || "").trim();
+  if (!/^[a-f0-9]{40}$/i.test(String(headSha || ""))) return false;
+  /* Match one complete answer, not a positive line embedded in findings or
+     duplicated receipts. The optional details block is GitHub boilerplate. */
+  const answer = body.match(
+    /^(?:<!-- codex-review-receipt:v1 -->\s+)?Codex Review: Didn't find any major issues\.(?: :rocket:| Keep it up!)?\s+\*\*Reviewed commit:\*\* `([a-f0-9]{10})`(?:\s+<details>\s*<summary>ℹ️ About Codex in GitHub<\/summary>[\s\S]*<\/details>)?$/i
+  );
+  if (!answer || (body.match(/<!-- codex-review-/gi) || []).length > 1 ||
+      (body.match(/\*\*Reviewed commit:/gi) || []).length !== 1 ||
+      containsBlockingCodexSeverity(body)) return false;
   const shortSha = String(headSha || "").slice(0, 10);
   const commentCreatedAt = Date.parse(comment?.created_at || "");
   const requestTime = Date.parse(requestedAt || "");
@@ -120,7 +128,30 @@ export function isAcceptableCodexSummaryComment(comment, headSha, requestedAt, r
     (Number.isFinite(commentCreatedAt) && Number.isFinite(requestTime) && ordering);
   return isAfterRequest &&
     isTrustedCodexLogin(comment?.user?.login) &&
-    /^Codex Review:\s*Didn't find any major issues\./im.test(body) &&
-    Boolean(shortSha) &&
-    new RegExp(`\\*\\*Reviewed commit:\\*\\*\\s*\\\`${shortSha}\\\``, "i").test(body);
+    normalize(answer[1]) === normalize(shortSha);
+}
+
+/** Summary/state HTML markers wake the gate but never supply a verdict. */
+export function isCodexReviewWakeupComment(body) {
+  return /^(?:Codex Review:|<!-- codex-review-receipt:v1 -->|<!-- codex-pull-request-review-summary -->)/i
+    .test(String(body || ""));
+}
+
+export function evaluateCodexReviewEvidence({ comments, reviews, reviewComments, threads, headSha }) {
+  /* A new request must not erase existing findings, including outdated and
+     P3 threads. Resolved state comes from GitHub, not comment prose. */
+  if (threads.some((thread) => !thread.isResolved &&
+      thread.comments.nodes.some((comment) => comment.author?.__typename === "Bot" &&
+        comment.author.login === "chatgpt-codex-connector"))) return "fail";
+  if (latestCodexNativeReviewResult(reviews, reviewComments, headSha) === "fail") return "fail";
+
+  const request = latestTrustedCodexReviewCommand(comments, headSha);
+  if (!request) return "missing_request";
+  const afterRequest = reviews.filter((review) =>
+    isStrictlyAfterCodexReviewRequest(review.submitted_at, request));
+  const nativeResult = latestCodexNativeReviewResult(afterRequest, reviewComments, headSha);
+  if (nativeResult) return nativeResult;
+  return comments.some((comment) => isAcceptableCodexSummaryComment(
+    comment, headSha, request.requestedAt, request.commentId
+  )) ? "pass" : "pending";
 }
