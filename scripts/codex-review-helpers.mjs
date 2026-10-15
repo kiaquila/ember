@@ -112,11 +112,14 @@ export function isAcceptableCodexSummaryComment(comment, headSha, requestedAt, r
   /* Match one complete answer, not a positive line embedded in findings or
      duplicated receipts. The optional details block is GitHub boilerplate. */
   const answer = body.match(
-    /^(?:<!-- codex-review-receipt:v1 -->\s+)?Codex Review: Didn't find any major issues\.(?: :rocket:| Keep it up!)?\s+\*\*Reviewed commit:\*\* `([a-f0-9]{10})`(?:\s+<details>\s*<summary>ℹ️ About Codex in GitHub<\/summary>[\s\S]*<\/details>)?$/i
+    /^(?:<!-- codex-review-receipt:v1 -->\s+)?Codex Review: Didn't find any major issues\.([^\r\n]*)\s+\*\*Reviewed commit:\*\* `([a-f0-9]{10})`(?:\s+<details>\s*<summary>ℹ️ About Codex in GitHub<\/summary>[\s\S]*<\/details>)?$/i
   );
   if (!answer || (body.match(/<!-- codex-review-/gi) || []).length > 1 ||
       (body.match(/\*\*Reviewed commit:/gi) || []).length !== 1 ||
       containsBlockingCodexSeverity(body)) return false;
+  /* Native receipts vary their celebratory suffix (for example "Hooray!").
+     Preserve that legacy freedom without accepting a qualified verdict. */
+  if (/\b(?:but|however|except|not|no|pending|running|incomplete|unfinished|findings?|issues?|failed|failure|error)\b/i.test(answer[1])) return false;
   const shortSha = String(headSha || "").slice(0, 10);
   const commentCreatedAt = Date.parse(comment?.created_at || "");
   const requestTime = Date.parse(requestedAt || "");
@@ -128,7 +131,7 @@ export function isAcceptableCodexSummaryComment(comment, headSha, requestedAt, r
     (Number.isFinite(commentCreatedAt) && Number.isFinite(requestTime) && ordering);
   return isAfterRequest &&
     isTrustedCodexLogin(comment?.user?.login) &&
-    normalize(answer[1]) === normalize(shortSha);
+    normalize(answer[2]) === normalize(shortSha);
 }
 
 /** Summary/state HTML markers wake the gate but never supply a verdict. */
