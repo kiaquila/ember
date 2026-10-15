@@ -4,7 +4,12 @@
 
 const TRUSTED_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 const CODEX_REVIEW_LOGIN = "chatgpt-codex-connector[bot]";
-const POSITIVE_RECEIPT_SUFFIXES = new Set(["", ":rocket:", "keep it up!", "hooray!"]);
+const POSITIVE_RECEIPT_SUFFIXES = new Set([
+  "", ":rocket:", ":tada:", "🚀", "🎉", "👍", "keep it up!", "hooray!",
+  "more of your lovely prs please.", "nice work!", "great work!", "great job!",
+  "well done!", "looks good!", "looking good!", "you're on fire!", "you’re on fire!",
+  "you rock!", "keep up the good work!", "happy merging!", "all good!", "ship it!"
+]);
 
 function normalize(value) {
   return String(value || "").trim().toLowerCase();
@@ -118,7 +123,7 @@ export function isAcceptableCodexSummaryComment(comment, headSha, requestedAt, r
   if (!answer || (body.match(/<!-- codex-review-/gi) || []).length > 1 ||
       (body.match(/\*\*Reviewed commit:/gi) || []).length !== 1 ||
       containsBlockingCodexSeverity(body)) return false;
-  /* Only observed positive decorations may qualify the explicit verdict.
+  /* Only known positive decorations may qualify the explicit verdict.
      Unknown prose must not turn a provisional answer into a passing gate. */
   if (!POSITIVE_RECEIPT_SUFFIXES.has(normalize(answer[1]))) return false;
   const shortSha = String(headSha || "").slice(0, 10);

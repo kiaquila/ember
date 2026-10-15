@@ -273,6 +273,7 @@ const evidence = (overrides = {}) => ({
 test("real receipt and legacy answers pass, including native GitHub details", () => {
   for (const body of [legacyBody, receiptBody, receiptBody.replace(":rocket:", "Keep it up!"),
     receiptBody.replace(":rocket:", "Hooray!"),
+    receiptBody.replace(":rocket:", "More of your lovely PRs please."),
     `${receiptBody}\n\n<details> <summary>ℹ️ About Codex in GitHub</summary>\n<br/>\n\nReviews are triggered when you comment \"@codex review\".\n</details>`]) {
     assert.equal(isAcceptableCodexSummaryComment(summaryComment(body), headSha, requestedAt, "10"), true);
     assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, summaryComment(body)] })), "pass");
