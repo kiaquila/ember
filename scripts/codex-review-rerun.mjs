@@ -2,7 +2,7 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { isTrustedCodexLogin } from "./codex-review-helpers.mjs";
+import { isCodexReviewWakeupComment, isTrustedCodexLogin } from "./codex-review-helpers.mjs";
 
 const ACTIVE_STATUSES = new Set([
   "queued",
@@ -15,9 +15,11 @@ const ACTIVE_RUN_POLL_INTERVAL_MS = 10_000;
 const MAX_ACTIVE_RUN_POLLS = 24;
 
 export function shouldRouteCodexReviewRerunEvent(event) {
-  if (event?.review) return isTrustedCodexLogin(event.review.user?.login);
+  if (event?.review) return event.action === "submitted" &&
+    isTrustedCodexLogin(event.review.user?.login);
+  if (!["created", "edited"].includes(event?.action)) return false;
   if (!event?.issue?.pull_request || !event?.comment) return false;
-  return /^Codex Review:/i.test(String(event.comment.body || "")) &&
+  return isCodexReviewWakeupComment(event.comment.body) &&
     isTrustedCodexLogin(event.comment.user?.login);
 }
 
@@ -62,6 +64,8 @@ export async function rerunCodexReviewForHead({
   token,
   repository,
   headSha,
+  prNumber,
+  evidenceAt,
   request = defaultRequest,
   sleep = defaultSleep,
   maxActiveRunPolls = MAX_ACTIVE_RUN_POLLS
@@ -87,6 +91,19 @@ export async function rerunCodexReviewForHead({
     );
   }
 
+  if (prNumber) {
+    const pull = await request(token, repository, `/repos/${owner}/${repo}/pulls/${prNumber}`);
+    if (pull.state !== "open" || pull.head?.sha !== headSha) {
+      return { action: "stale", run: null, message: `PR head moved or closed; no rerun for ${headSha}.` };
+    }
+  }
+
+  if (selected.action === "rerun" &&
+      Date.parse(selected.run.run_started_at || "") > Date.parse(evidenceAt || "")) {
+    return { action: "already_evaluated", run: selected.run,
+      message: `Codex Review run ${selected.run.id} already evaluated this evidence for ${headSha}.` };
+  }
+
   if (selected.action === "rerun") {
     await request(
       token,
@@ -100,7 +117,6 @@ export async function rerunCodexReviewForHead({
     };
   }
 
-  const runId = selected.run?.id ? ` run ${selected.run.id}` : "";
   const messages = {
     not_found: `No completed Codex Review pull_request run found for ${headSha}.`
   };
@@ -136,7 +152,9 @@ async function main() {
   }
 
   const headSha = await resolveHeadSha({ token, repository, event });
-  const result = await rerunCodexReviewForHead({ token, repository, headSha });
+  const prNumber = event.issue?.number || event.pull_request?.number;
+  const evidenceAt = event.comment?.updated_at || event.comment?.created_at || event.review?.submitted_at;
+  const result = await rerunCodexReviewForHead({ token, repository, headSha, prNumber, evidenceAt });
   console.log(result.message);
 }
 
