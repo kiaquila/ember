@@ -149,6 +149,15 @@ export function isCodexReviewWakeupComment(body) {
     .test(String(body || ""));
 }
 
+function codeReviewCompletedAt(body, headSha) {
+  const rows = [...body.matchAll(/^\| 📝 \*\*Code Review\*\* \| ✅ \*\*Completed\*\* <relative-time datetime="([^"]+)">([^<]+)<\/relative-time> \| `([a-f0-9]{7,40})` \| [^|\r\n]+ \|$/gm)];
+  if (rows.length !== 1 || (body.match(/\*\*Code Review\*\*/g) || []).length !== 1) return NaN;
+  const [, timestamp, visibleTime, sha] = rows[0];
+  if (timestamp !== visibleTime || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z$/.test(timestamp) || !headSha.startsWith(sha)) return NaN;
+  const completed = Date.parse(timestamp);
+  return Number.isFinite(completed) && new Date(completed).toISOString().slice(0, 19) === timestamp.slice(0, 19) ? completed : NaN;
+}
+
 /** Affirmative machine evidence has a closed schema and the full current SHA.
  * Prose, reactions and the visible Completed heading never grant approval. */
 export function isAffirmativeCodexReviewState(comment, headSha, requestedAt, requestCommentId) {
@@ -165,7 +174,9 @@ export function isAffirmativeCodexReviewState(comment, headSha, requestedAt, req
   if ([...presentation.matchAll(/\b[a-f0-9]{7,40}\b/gi)].some(([sha]) => !headSha.startsWith(sha))) return false;
   const observed = Date.parse(comment.updated_at || comment.created_at || "");
   const requested = Date.parse(requestedAt || "");
-  if (!Number.isFinite(observed) || !Number.isFinite(requested) ||
+  const completed = codeReviewCompletedAt(body, headSha);
+  if (!Number.isFinite(completed) || Math.floor(completed / 1000) <= Math.floor(requested / 1000) || completed >= observed + 1000 ||
+      !Number.isFinite(observed) || !Number.isFinite(requested) ||
       !(observed > requested || (observed === requested && compareNumericIds(comment.id, requestCommentId) > 0))) return false;
   try {
     const state = JSON.parse(match[1]);
@@ -196,20 +207,26 @@ function latestCodexCommentResult(comments, headSha, requestedAt, requestComment
   const isReceiptCandidate = (comment) => {
     const body = String(comment.body || "");
     const match = body.match(/(Codex Review: Didn't find any major issues\.)([^\r\n]*)/);
-    if (!match || match[2].length > 121 || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}<>{}\[\]`*=\\/|]/u.test(match[2]) ||
-        /\b[a-f0-9]{7,40}\b/i.test(match[2]) ||
-        /\b(?:but|however|except|unless|not|cannot|found|findings?|issues?|bugs?|defects?|regressions?|vulnerabilit\w*|concerns?|security|critical|blocker|review\w*|codex|commit|sha|status|state|metadata|request\w*|approv\w*|reject\w*|pending|progress|incomplete|provisional|await\w*|verif\w*|fail\w*|unresolved|remain\w*|required|needs?|must|fix\w*|leaks?|credentials?|delet\w*|customer data)\b/i.test(match[2])) return false;
+    if (!match || (match[2] && !match[2].startsWith(" ")) || match[2].length > 121 ||
+        (body.match(/Codex Review:/g) || []).length !== 1 || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}<>{}\[\]`*=\\/|]/u.test(match[2]) ||
+        /\b[a-f0-9]{7,40}\b/i.test(match[2]) || containsBlockingCodexSeverity(body)) return false;
     return isAcceptableCodexSummaryComment({ ...comment, body: body.replace(match[0], match[1]) }, headSha, requestedAt, requestCommentId);
   };
   // Unknown closings remain pending evidence. Only a strictly newer complete
   // machine summary supersedes one; a later receipt needs a fresh summary.
-  // Malformed and explicitly contradictory receipts remain unconditional vetoes.
+  // Malformed envelopes and explicit P0-P2 findings remain unconditional vetoes.
   if (receipts.some((comment) => !isAcceptableCodexSummaryComment(comment, headSha, requestedAt, requestCommentId) && !isReceiptCandidate(comment))) return "pending";
   const candidates = [...summaries, ...receipts];
   if (!candidates.length) return null;
-  const observed = (comment) => Date.parse(comment.updated_at || comment.created_at || "");
-  const latestTime = Math.max(...candidates.map(observed));
-  const latest = candidates.filter((comment) => observed(comment) === latestTime);
+  const observed = (comment) => summaries.includes(comment) &&
+    isAffirmativeCodexReviewState(comment, headSha, requestedAt, requestCommentId)
+    ? codeReviewCompletedAt(String(comment.body || ""), headSha)
+    : Date.parse(comment.updated_at || comment.created_at || "");
+  // GitHub comment timestamps have second precision while completion rows
+  // include microseconds. Compare second buckets so uncertainty stays pending.
+  const bucket = (comment) => Math.floor(observed(comment) / 1000);
+  const latestTime = Math.max(...candidates.map(bucket));
+  const latest = candidates.filter((comment) => bucket(comment) === latestTime);
   return latest.every((comment) => summaries.includes(comment)
     ? isAffirmativeCodexReviewState(comment, headSha, requestedAt, requestCommentId)
     : isAcceptableCodexSummaryComment(comment, headSha, requestedAt, requestCommentId)) ? "pass" : "pending";

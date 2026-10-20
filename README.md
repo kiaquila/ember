@@ -52,14 +52,23 @@ must follow the current trusted request, with IDs ordering same-second events.
 Newer non-clean state supersedes older clean state, including pending, malformed
 and wrong-head updates; ambiguous equal-time summaries fail closed.
 
-This intentionally replaces the old wakeup-only treatment of structured state.
-Headings, reactions and prose still cannot grant success. A new presentation
-closing such as `Swish!` or `Chef's kiss.` remains pending until a strictly newer
-affirmative machine summary supersedes it. A later or equal-time unfamiliar
-receipt requires a fresh summary; the receipt cannot pass alone. Strict legacy receipt validation remains
-the fallback. Malformed or contradictory receipts and native blocking findings
-or unresolved threads cannot be rescued by a clean machine summary. Reruns wait
-for an active gate and coalesce events already read by a later attempt.
+This intentionally replaces the old wakeup-only treatment of structured state
+with an independent machine verdict and explicit chronology. Every unfamiliar
+receipt is pending, whether its prose appears positive or negative; a strictly
+newer affirmative machine completion independently supersedes that unstructured
+text. Later or same-second unfamiliar text requires a fresh completion. The
+legacy receipt parser remains strict and arbitrary prose never grants success.
+
+The visible code-review row must name the same head and a valid completion time
+strictly after the trusted request. Evidence order uses that code completion
+time, rather than summary `updated_at`, so a security-only edit cannot renew old
+code approval or supersede later receipt text. GitHub's second-precision comment
+times and subsecond completion rows use second buckets; ambiguous ties stay
+pending. Headings and reactions are not proof. Native P0–P2 findings, unresolved
+threads and malformed receipt envelopes retain their vetoes, including duplicate
+verdict/SHA fields, unknown markers, extra lines and explicit P0–P2 receipt
+findings. Contradictory visible summary status invalidates machine state. Reruns
+wait for active gates and coalesce events already read by a later attempt.
 
 While this contract upgrade is under review, the trusted default-branch gate
 still requires its accepted legacy receipt or native formal review. Request real
