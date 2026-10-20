@@ -214,7 +214,7 @@ function latestCodexCommentResult(comments, headSha, requestedAt, requestComment
     if (!match || (match[2] && !match[2].startsWith(" ")) || match[2].length > 121 ||
         (body.match(/Codex Review:/g) || []).length !== 1 || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}<>{}\[\]`*=\\/|]/u.test(match[2]) ||
         /\b[a-f0-9]{7,40}\b/i.test(match[2]) || containsBlockingCodexSeverity(body)) return false;
-    return isAcceptableCodexSummaryComment({ ...comment, body: body.replace(match[0], match[1]) }, headSha, requestedAt, requestCommentId);
+    return isAcceptableCodexSummaryComment({ ...comment, created_at: comment.updated_at || comment.created_at, body: body.replace(match[0], match[1]) }, headSha, requestedAt, requestCommentId);
   };
   // Unknown closings remain pending evidence. Only a strictly newer complete
   // machine summary supersedes one; a later receipt needs a fresh summary.

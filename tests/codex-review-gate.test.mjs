@@ -651,3 +651,15 @@ test("same-second receipts preceding the request cannot veto a fresh answer", ()
   const current = { ...previous, id: 11 };
   assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, current] })), "pass", "later numeric ID proves same-second freshness");
 });
+
+
+test("a fresh completion supersedes an eligible pre-request receipt edit", () => {
+  const edited = { ...summaryComment(receiptBody.replace(":rocket:", "Swish!")), created_at: "2026-10-15T19:00:00Z", updated_at: "2026-10-15T21:30:00Z" };
+  const state = { ...summaryComment(stateBody.replaceAll(answeredAt, "2026-10-15T22:00:00Z")), updated_at: "2026-10-15T22:00:00Z" };
+  const comments = [edited, state];
+  assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments] })), "pass");
+  assert.equal(runGate(comments).status, 0);
+  edited.updated_at = "2026-10-15T23:00:00Z";
+  assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments] })), "pending");
+  assert.equal(runGate(comments).status, 1);
+});
