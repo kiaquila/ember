@@ -175,6 +175,24 @@ test("a no-findings summary must name the reviewed head and follow the request",
   );
 });
 
+test("observed receipt sign-offs preserve author, head, timing and verdict checks", () => {
+  const requestedAt = "2026-10-15T20:00:00Z";
+  for (const suffix of ["Another round soon, please!", "You're on a roll.", "You’re on a roll.",
+    "Already looking forward to the next diff.", "Breezy!", "What shall we delve into next?",
+    "Can't wait for the next one!", ":+1:"]) {
+    const body = `<!-- codex-review-receipt:v1 -->\n\nCodex Review: Didn't find any major issues. ${suffix}\n\n**Reviewed commit:** \`${headSha.slice(0, 10)}\``;
+    const receipt = { id: 20, user: codexUser, body, created_at: "2026-10-15T20:01:00Z" };
+    const accepts = (comment) => isAcceptableCodexSummaryComment(comment, headSha, requestedAt, "10");
+    assert.equal(accepts(receipt), true, suffix);
+    assert.equal(accepts({ ...receipt, user: { login: "someone" } }), false);
+    assert.equal(accepts({ ...receipt, created_at: "2026-10-15T19:59:00Z" }), false);
+    assert.equal(accepts({ ...receipt, body: body.replace(headSha.slice(0, 10), "f".repeat(10)) }), false);
+    for (const conflicting of [" But there is a regression.", " P2 finding", " Review pending."]) {
+      assert.equal(accepts({ ...receipt, body: body.replace(suffix, suffix + conflicting) }), false);
+    }
+  }
+});
+
 test("rerun routing accepts only Codex's own evidence", () => {
   assert.equal(shouldRouteCodexReviewRerunEvent({ action: "submitted", review: { user: codexUser } }), true);
   assert.equal(shouldRouteCodexReviewRerunEvent({ action: "submitted", review: { user: { login: "kiaquila" } } }), false);

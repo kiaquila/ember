@@ -8,7 +8,10 @@ const POSITIVE_RECEIPT_SUFFIXES = new Set([
   "", ":rocket:", ":tada:", "🚀", "🎉", "👍", "keep it up!", "hooray!",
   "more of your lovely prs please.", "nice work!", "great work!", "great job!",
   "well done!", "looks good!", "looking good!", "you're on fire!", "you’re on fire!",
-  "you rock!", "keep up the good work!", "happy merging!", "all good!", "ship it!"
+  "you rock!", "keep up the good work!", "happy merging!", "all good!", "ship it!",
+  "another round soon, please!", "you're on a roll.", "you’re on a roll.",
+  "already looking forward to the next diff.", "breezy!",
+  "what shall we delve into next?", "can't wait for the next one!", ":+1:"
 ]);
 
 function normalize(value) {
