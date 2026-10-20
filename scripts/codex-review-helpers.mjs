@@ -218,8 +218,9 @@ function typedCodexReviewState(comment) {
           ((value.status === "completed" && typeof value.has_any_findings === "boolean" && typeof value.has_unresolved_findings === "boolean") ||
            (value.status === "running" && value.has_any_findings === null && value.has_unresolved_findings === null))));
     if (!valid(state.code_review) || !valid(state.security_review)) return null;
-    if (state.code_review.status === "completed") {
-      const completed = codeReviewCompletedAt(body, state.code_review.commit_sha);
+    for (const section of ["code_review", "security_review"]) {
+      if (state[section].status !== "completed") continue;
+      const completed = codeReviewCompletedAt(body, state[section].commit_sha, section);
       const observed = Date.parse(comment.updated_at || comment.created_at || "");
       if (!Number.isFinite(completed) || !Number.isFinite(observed) || completed >= observed + 1000) return null;
     }
@@ -277,7 +278,9 @@ function latestCodexCommentResult(comments, headSha, requestedAt, requestComment
   // A strictly newer formal clean review is independent affirmative evidence.
   // Same-second ambiguity and newer pending comments still prevent approval.
   const sections = ["code_review", "security_review"];
-  const cleanSummaries = summaries.filter((comment) => isAffirmativeCodexReviewState(comment, headSha, requestedAt, requestCommentId));
+  // Historical clean proof only resolves historical findings; it cannot grant
+  // current-request approval, which still uses candidates above.
+  const cleanSummaries = signals.filter((comment) => isAffirmativeCodexReviewState(comment, headSha, "1970-01-01T00:00:00Z", 0));
   const lastAffirmativeTime = (section) => Math.max(...cleanSummaries.filter((comment) => {
     const value = typedCodexReviewState(comment)?.[section];
     return value?.commit_sha === headSha && value.status === "completed" &&
@@ -300,7 +303,7 @@ function latestCodexCommentResult(comments, headSha, requestedAt, requestComment
       (state[section].has_any_findings === true || state[section].has_unresolved_findings === true) &&
       Math.floor(findingCompletedAt(comment, section, headSha) / 1000) >= lastAffirmativeTime(section));
     // Malformed current-request negative evidence retains its existing veto.
-    return summaries.includes(comment) && observedBucket >= Math.max(...cleanSummaries.map(bucket)) &&
+    return summaries.includes(comment) && observedBucket >= Math.max(...summaries.filter((entry) => isAffirmativeCodexReviewState(entry, headSha, requestedAt, requestCommentId)).map(bucket)) &&
       [...String(comment.body || "").matchAll(/("(?:\\.|[^"\\])*")\s*:\s*(true|false|null)/g)].some((entry) => {
         if (entry[2] !== "true") return false;
         try { return ["has_any_findings", "has_unresolved_findings"].includes(JSON.parse(entry[1])); }
