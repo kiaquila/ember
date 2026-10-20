@@ -205,7 +205,9 @@ function latestCodexCommentResult(comments, headSha, requestedAt, requestComment
   const receiptObservedAt = (comment) => Date.parse(isAcceptableCodexSummaryComment(comment, headSha)
     ? comment.created_at || "" : comment.updated_at || comment.created_at || "");
   const receipts = signals.filter((comment) => /Codex Review:|codex-review-receipt:/.test(String(comment.body || "")) &&
-    receiptObservedAt(comment) >= Date.parse(requestedAt || ""));
+    (isAcceptableCodexSummaryComment(comment, headSha)
+      ? isAcceptableCodexSummaryComment(comment, headSha, requestedAt, requestCommentId)
+      : receiptObservedAt(comment) >= Date.parse(requestedAt || "")));
   const isReceiptCandidate = (comment) => {
     const body = String(comment.body || "");
     const match = body.match(/(Codex Review: Didn't find any major issues\.)([^\r\n]*)/);
