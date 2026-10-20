@@ -750,6 +750,18 @@ test("same-head repeated requests retain typed findings until matching newer mac
       comments.push({ ...summaryComment(withSecurityProof(stateBody).replaceAll(answeredAt, "2026-10-16T00:00:00Z")), updated_at: "2026-10-16T00:00:00Z" });
       assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pass");
       assert.equal(runGate([repeated, ...comments], reviews).status, 0);
+      comments[0].updated_at = "2026-10-16T01:00:00Z";
+      assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pass", "unrelated summary edits cannot renew an older section finding");
+      if (section === "code_review") {
+        const original = comments[0].body;
+        const encoded = original.match(/codex-review-state:v1 (\{[^\r\n]*\}) -->/)[1];
+        const state = JSON.parse(encoded);
+        state.security_review = { commit_sha: headSha, has_any_findings: null, has_unresolved_findings: null, status: "running" };
+        comments[0].body = original.replace(encoded, JSON.stringify(state));
+        assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pending", "new running security state retains update-time ordering");
+        comments[0].body = original;
+      }
+      assert.equal(runGate([repeated, ...comments], reviews).status, 0);
     }
   }
 });

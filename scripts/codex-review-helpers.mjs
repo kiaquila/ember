@@ -227,6 +227,12 @@ function typedCodexReviewState(comment) {
   } catch { return null; }
 }
 
+function findingCompletedAt(comment, section, headSha) {
+  const completed = codeReviewCompletedAt(String(comment.body || ""), headSha, section);
+  const observed = Date.parse(comment.updated_at || comment.created_at || "");
+  return Number.isFinite(completed) && completed <= observed + 999 ? completed : observed;
+}
+
 function latestCodexCommentResult(comments, headSha, requestedAt, requestCommentId, nativeCompletedAt = NaN) {
   const signals = comments.filter((comment) => isTrustedCodexLogin(comment?.user?.login));
   const summaries = signals.filter((comment) => /codex-pull-request-review-summary|codex-review-state:/.test(String(comment.body || "")) &&
@@ -252,10 +258,16 @@ function latestCodexCommentResult(comments, headSha, requestedAt, requestComment
   // Malformed envelopes and explicit P0-P2 findings remain unconditional vetoes.
   if (receipts.some((comment) => !isAcceptableCodexSummaryComment(comment, headSha, requestedAt, requestCommentId) && !isReceiptCandidate(comment))) return "pending";
   const candidates = [...summaries, ...receipts];
-  const observed = (comment) => summaries.includes(comment) &&
+  const observed = (comment) => {
+    const state = typedCodexReviewState(comment);
+    const findings = ["code_review", "security_review"].filter((section) => state?.[section]?.commit_sha === headSha &&
+      (state[section].has_any_findings === true || state[section].has_unresolved_findings === true));
+    if (findings.length && ![state.code_review, state.security_review].some((value) => value.status === "running")) return Math.max(...findings.map((section) => findingCompletedAt(comment, section, headSha)));
+    return summaries.includes(comment) &&
     isAffirmativeCodexReviewState(comment, headSha, requestedAt, requestCommentId)
     ? codeReviewCompletedAt(String(comment.body || ""), headSha)
     : summaries.includes(comment) ? Date.parse(comment.updated_at || comment.created_at || "") : receiptObservedAt(comment);
+  };
   // Positive receipt edits never renew approval. Unknown or negative edits
   // retain their update time so they can invalidate an older completion.
   // GitHub comment timestamps have second precision while completion rows
@@ -286,7 +298,7 @@ function latestCodexCommentResult(comments, headSha, requestedAt, requestComment
     const observedBucket = Math.floor(Date.parse(comment.updated_at || comment.created_at || "") / 1000);
     if (state) return sections.some((section) => state[section].commit_sha === headSha &&
       (state[section].has_any_findings === true || state[section].has_unresolved_findings === true) &&
-      observedBucket >= lastAffirmativeTime(section));
+      Math.floor(findingCompletedAt(comment, section, headSha) / 1000) >= lastAffirmativeTime(section));
     // Malformed current-request negative evidence retains its existing veto.
     return summaries.includes(comment) && observedBucket >= Math.max(...cleanSummaries.map(bucket)) &&
       [...String(comment.body || "").matchAll(/("(?:\\.|[^"\\])*")\s*:\s*(true|false|null)/g)].some((entry) => {

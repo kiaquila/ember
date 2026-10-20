@@ -67,7 +67,7 @@ A trusted exact-head clean formal review can also supersede strictly older
 pending summary evidence. Valid exact-head structured findings survive a repeated request for that head.
 Code findings require newer affirmative code proof; security findings require
 newer completed false/false security proof for that head (null is insufficient).
-Malformed and foreign-head historical state cannot become permanent vetoes.
+Typed finding order uses the affected section’s canonical completion time; unrelated summary edits do not renew that finding. Malformed and foreign-head historical state cannot become permanent vetoes.
 Explicit structured code/security findings require newer affirmative structured proof; a formal code review cannot clear them.
 Its submission time uses the same second buckets;
 tied or newer pending comments still block, and malformed receipt envelopes,
