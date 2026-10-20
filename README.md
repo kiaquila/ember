@@ -63,6 +63,11 @@ Strict positive receipt freshness and ordering use creation time; an edit cannot
 renew approval or outrank a later pending verdict. Unknown or negative receipt
 edits retain their update time so they can invalidate an older clean completion.
 
+A trusted exact-head clean formal review can also supersede strictly older
+pending summary evidence. Its submission time uses the same second buckets;
+tied or newer pending comments still block, and malformed receipt envelopes,
+native findings and unresolved threads retain their vetoes.
+
 A mutable summary updated in the request’s second remains ambiguous even if its
 original comment ID is lower: that ID dates creation, not the edit. Such ties
 stay pending; a fresh request or completion in a later second removes ambiguity.

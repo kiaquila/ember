@@ -196,7 +196,7 @@ export function isAffirmativeCodexReviewState(comment, headSha, requestedAt, req
   } catch { return false; }
 }
 
-function latestCodexCommentResult(comments, headSha, requestedAt, requestCommentId) {
+function latestCodexCommentResult(comments, headSha, requestedAt, requestCommentId, nativeCompletedAt = NaN) {
   const signals = comments.filter((comment) => isTrustedCodexLogin(comment?.user?.login));
   const summaries = signals.filter((comment) => /codex-pull-request-review-summary|codex-review-state:/.test(String(comment.body || "")) &&
     Date.parse(comment.updated_at || comment.created_at || "") >= Date.parse(requestedAt || ""));
@@ -214,7 +214,7 @@ function latestCodexCommentResult(comments, headSha, requestedAt, requestComment
     if (!match || (match[2] && !match[2].startsWith(" ")) || match[2].length > 121 ||
         (body.match(/Codex Review:/g) || []).length !== 1 || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}<>{}\[\]`*=\\/|]/u.test(match[2]) ||
         /\b[a-f0-9]{7,40}\b/i.test(match[2]) || containsBlockingCodexSeverity(body)) return false;
-    return isAcceptableCodexSummaryComment({ ...comment, created_at: comment.updated_at || comment.created_at, body: body.replace(match[0], match[1]) }, headSha, requestedAt, requestCommentId);
+    return isAcceptableCodexSummaryComment({ ...comment, body: body.replace(match[0], match[1]) }, headSha);
   };
   // Unknown closings remain pending evidence. Only a strictly newer complete
   // machine summary supersedes one; a later receipt needs a fresh summary.
@@ -232,6 +232,9 @@ function latestCodexCommentResult(comments, headSha, requestedAt, requestComment
   // include microseconds. Compare second buckets so uncertainty stays pending.
   const bucket = (comment) => Math.floor(observed(comment) / 1000);
   const latestTime = Math.max(...candidates.map(bucket));
+  // A strictly newer formal clean review is independent affirmative evidence.
+  // Same-second ambiguity and newer pending comments still prevent approval.
+  if (Math.floor(nativeCompletedAt / 1000) > latestTime) return "pass";
   const latest = candidates.filter((comment) => bucket(comment) === latestTime);
   return latest.every((comment) => summaries.includes(comment)
     ? isAffirmativeCodexReviewState(comment, headSha, requestedAt, requestCommentId)
@@ -255,6 +258,9 @@ export function evaluateCodexReviewEvidence({ comments, reviews, reviewComments,
     isStrictlyAfterCodexReviewRequest(review.submitted_at, request));
   const nativeResult = latestCodexNativeReviewResult(afterRequest, reviewComments, headSha);
   if (nativeResult === "fail") return nativeResult;
-  const commentResult = latestCodexCommentResult(comments, headSha, request.requestedAt, request.commentId);
+  const nativeCompletedAt = nativeResult === "pass" ? Math.max(...afterRequest.filter((review) =>
+    classifyCodexNativeReview(review, reviewComments, headSha) === "pass"
+  ).map((review) => Date.parse(review.submitted_at || ""))) : NaN;
+  const commentResult = latestCodexCommentResult(comments, headSha, request.requestedAt, request.commentId, nativeCompletedAt);
   return commentResult === "pending" ? "pending" : nativeResult || commentResult || "pending";
 }

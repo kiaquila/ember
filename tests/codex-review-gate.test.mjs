@@ -516,10 +516,10 @@ test("only newer structured proof supersedes an unfamiliar closing", () => {
   assert.equal(run([{ ...state, user: { login: "fake-codex[bot]" } }]), "pending");
 });
 
-function runGate(comments) {
+function runGate(comments, reviews = []) {
   const directory = mkdtempSync(join(tmpdir(), "ember-gate-test-"));
   try {
-    const fixture = { comments: [command, ...comments], headSha };
+    const fixture = { comments: [command, ...comments], headSha, reviews };
     const preload = join(directory, "mock.mjs");
     writeFileSync(preload, `const fixture = ${JSON.stringify(fixture)};
       globalThis.fetch = async (url) => {
@@ -527,6 +527,7 @@ function runGate(comments) {
         if (path === '/graphql') data = { data: { repository: { pullRequest: { reviewThreads: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } } } } };
         else if (path.endsWith('/pulls/1')) data = { head: { sha: fixture.headSha } };
         else if (path.includes('/issues/1/comments')) data = fixture.comments;
+      else if (path.endsWith('/reviews')) data = fixture.reviews;
         else data = [];
         return { ok: true, json: async () => data };
       };`);
@@ -671,4 +672,28 @@ test("a mutable summary edit tied with the request stays pending despite its old
   const comments = [updated, answer];
   assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments] })), "pending", "the lower ID dates creation, not the edit within this second");
   assert.equal(runGate(comments).status, 1);
+});
+
+
+test("a later completion supersedes an ambiguous same-second receipt edit", () => {
+  const edited = { ...summaryComment(receiptBody.replace(":rocket:", "Swish!")), id: 9, created_at: "2026-10-15T19:00:00Z", updated_at: requestedAt };
+  const comments = [edited];
+  assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments] })), "pending");
+  comments.push(summaryComment(stateBody));
+  assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments] })), "pass");
+  assert.equal(runGate(comments).status, 0);
+});
+
+
+test("formal clean reviews supersede only strictly older pending comment evidence", () => {
+  const reviews = [{ id: 200, commit_id: headSha, state: "COMMENTED", user: codexUser, submitted_at: "2026-10-15T22:00:00Z" }];
+  for (const body of [stateBody.replace('"completed"', '"running"'), stateBody.replace('"code_review":', '"code_review":broken')]) {
+    for (const [updated_at, expected] of [["2026-10-15T21:30:00Z", "pass"], ["2026-10-15T22:00:00Z", "pending"], ["2026-10-15T23:00:00Z", "pending"]]) {
+      const comments = [{ ...summaryComment(body), updated_at }];
+      assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments], reviews })), expected);
+      assert.equal(runGate(comments, reviews).status, expected === "pass" ? 0 : 1);
+    }
+  }
+  const comments = [summaryComment(receiptBody + "\nExtra line.")];
+  assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments], reviews })), "pending", "formal proof never hides malformed receipt envelopes");
 });
