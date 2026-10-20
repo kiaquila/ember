@@ -697,3 +697,23 @@ test("formal clean reviews supersede only strictly older pending comment evidenc
   const comments = [summaryComment(receiptBody + "\nExtra line.")];
   assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments], reviews })), "pending", "formal proof never hides malformed receipt envelopes");
 });
+
+
+test("formal code approval cannot clear explicit structured code or security findings", () => {
+  const reviews = [{ id: 200, commit_id: headSha, state: "COMMENTED", user: codexUser, submitted_at: "2026-10-15T23:00:00Z" }];
+  for (const section of ["code_review", "security_review"]) {
+    for (const field of ["has_any_findings", "has_unresolved_findings"]) {
+      const body = stateBody.replace(new RegExp('("' + section + '":\\{[^}]*"' + field + '":)(?:false|null)'), '$1true');
+      const negative = summaryComment(body);
+      const comments = [negative];
+      assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments], reviews })), "pending", section + field);
+      assert.equal(runGate(comments, reviews).status, 1);
+      const laterReceipt = { ...summaryComment(receiptBody), created_at: "2026-10-15T22:00:00Z", updated_at: "2026-10-15T22:00:00Z" };
+      assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments, laterReceipt] })), "pending", "code receipt cannot revise explicit structured security/code findings");
+      comments.push({ ...summaryComment(stateBody.replace('"completed"', '"running"')), updated_at: "2026-10-15T22:00:00Z" });
+      assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments], reviews })), "pending", "a later pending summary cannot clear findings either");
+      comments.push({ ...summaryComment(stateBody.replaceAll(answeredAt, "2026-10-15T22:30:00Z")), updated_at: "2026-10-15T22:30:00Z" });
+      assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments], reviews })), "pass", "newer affirmative structured proof clears the previous finding");
+    }
+  }
+});

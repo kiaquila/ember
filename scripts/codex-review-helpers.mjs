@@ -234,6 +234,19 @@ function latestCodexCommentResult(comments, headSha, requestedAt, requestComment
   const latestTime = Math.max(...candidates.map(bucket));
   // A strictly newer formal clean review is independent affirmative evidence.
   // Same-second ambiguity and newer pending comments still prevent approval.
+  const lastAffirmativeTime = Math.max(...summaries.filter((comment) =>
+    isAffirmativeCodexReviewState(comment, headSha, requestedAt, requestCommentId)
+  ).map(bucket));
+  const unclearedFindings = summaries.some((comment) => bucket(comment) >= lastAffirmativeTime &&
+    [...String(comment.body || "").matchAll(/("(?:\\.|[^"\\])*")\s*:\s*(true|false|null)/g)]
+      .some((entry) => {
+        if (entry[2] !== "true") return false;
+        try { return ["has_any_findings", "has_unresolved_findings"].includes(JSON.parse(entry[1])); }
+        catch { return true; }
+      }));
+  // Code-only formal approval cannot revise an explicit code/security finding.
+  // Only a newer affirmative structured state clears that independent signal.
+  if (unclearedFindings) return "pending";
   if (Math.floor(nativeCompletedAt / 1000) > latestTime) return "pass";
   const latest = candidates.filter((comment) => bucket(comment) === latestTime);
   return latest.every((comment) => summaries.includes(comment)
