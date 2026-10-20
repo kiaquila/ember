@@ -703,7 +703,7 @@ test("formal code approval cannot clear explicit structured code or security fin
   const reviews = [{ id: 200, commit_id: headSha, state: "COMMENTED", user: codexUser, submitted_at: "2026-10-15T23:00:00Z" }];
   for (const section of ["code_review", "security_review"]) {
     for (const field of ["has_any_findings", "has_unresolved_findings"]) {
-      const body = stateBody.replace(new RegExp('("' + section + '":\\{[^}]*"' + field + '":)(?:false|null)'), '$1true');
+      const body = (section === "security_review" ? withSecurityProof(stateBody) : stateBody).replace(new RegExp('("' + section + '":\\{[^}]*"' + field + '":)(?:false|null)'), '$1true');
       const negative = summaryComment(body);
       const comments = [negative];
       assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments], reviews })), "pending", section + field);
@@ -712,8 +712,57 @@ test("formal code approval cannot clear explicit structured code or security fin
       assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments, laterReceipt] })), "pending", "code receipt cannot revise explicit structured security/code findings");
       comments.push({ ...summaryComment(stateBody.replace('"completed"', '"running"')), updated_at: "2026-10-15T22:00:00Z" });
       assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments], reviews })), "pending", "a later pending summary cannot clear findings either");
-      comments.push({ ...summaryComment(stateBody.replaceAll(answeredAt, "2026-10-15T22:30:00Z")), updated_at: "2026-10-15T22:30:00Z" });
+      comments.push({ ...summaryComment((section === "security_review" ? withSecurityProof(stateBody) : stateBody).replaceAll(answeredAt, "2026-10-15T22:30:00Z")), updated_at: "2026-10-15T22:30:00Z" });
       assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments], reviews })), "pass", "newer affirmative structured proof clears the previous finding");
     }
+  }
+});
+
+function withSecurityProof(body) {
+  const match = body.match(/codex-review-state:v1 (\{[^\r\n]*\}) -->/);
+  const state = JSON.parse(match[1]);
+  state.security_review = { ...state.code_review };
+  const row = body.match(/^\| 📝 \*\*Code Review\*\*.*$/m)?.[0];
+  return body.replace(match[1], JSON.stringify(state)).replace(row, row + "\n" + row.replace("📝 **Code Review**", "🛡️ **Security Review**"));
+}
+
+
+test("same-head repeated requests retain typed findings until matching newer machine proof", () => {
+  const repeatedAt = "2026-10-15T22:00:00Z";
+  const repeated = { ...command, id: 100, created_at: repeatedAt };
+  const reviews = [{ id: 200, commit_id: headSha, state: "COMMENTED", user: codexUser, submitted_at: "2026-10-15T23:00:00Z" }];
+  const answer = { ...summaryComment(receiptBody), created_at: "2026-10-15T23:00:00Z", updated_at: "2026-10-15T23:00:00Z" };
+  for (const section of ["code_review", "security_review"]) {
+    for (const field of ["has_any_findings", "has_unresolved_findings"]) {
+      const source = section === "security_review" ? withSecurityProof(stateBody) : stateBody;
+      const body = source.replace(new RegExp('("' + section + '":\\{[^}]*"' + field + '":)(?:false|null)'), '$1true');
+      const comments = [summaryComment(body), answer];
+      assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pending", section + field);
+      assert.equal(runGate([repeated, ...comments], reviews).status, 1);
+      comments.push({ ...summaryComment(stateBody.replaceAll(answeredAt, "2026-10-15T23:30:00Z")), updated_at: "2026-10-15T23:30:00Z" });
+      assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), section === "security_review" ? "pending" : "pass", "null security is not security completion");
+      if (section === "security_review") {
+        for (const transform of [(body) => body.replace(/^\| 🛡️ \*\*Security Review\*\*.*$/m, ""), (body) => body.replace(/(🛡️ \*\*Security Review\*\*.*)/, (row) => row.replaceAll("2026-10-15T23:45:00Z", answeredAt))]) {
+          comments.push({ ...summaryComment(transform(withSecurityProof(stateBody).replaceAll(answeredAt, "2026-10-15T23:45:00Z"))), updated_at: "2026-10-15T23:45:00Z" });
+          assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pending", "missing or stale security completion cannot clear findings");
+        }
+      }
+      comments.push({ ...summaryComment(withSecurityProof(stateBody).replaceAll(answeredAt, "2026-10-16T00:00:00Z")), updated_at: "2026-10-16T00:00:00Z" });
+      assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pass");
+      assert.equal(runGate([repeated, ...comments], reviews).status, 0);
+    }
+  }
+});
+
+test("historical malformed and foreign-head state cannot become persistent finding vetoes", () => {
+  const repeatedAt = "2026-10-15T22:00:00Z";
+  const repeated = { ...command, id: 100, created_at: repeatedAt };
+  const reviews = [{ id: 200, commit_id: headSha, state: "COMMENTED", user: codexUser, submitted_at: "2026-10-15T23:00:00Z" }];
+  const answer = { ...summaryComment(receiptBody), created_at: "2026-10-15T23:00:00Z", updated_at: "2026-10-15T23:00:00Z" };
+  const negative = stateBody.replace('"has_any_findings":false', '"has_any_findings":true');
+  for (const body of [negative.replace('state:v1', 'state:v2'), negative.replace('"code_review":', '"code_review":broken'), negative.replace('"code_review":', '"code_review":{},"code_review":'), negative + "\n<!-- unknown -->", negative.replaceAll(headSha, "f".repeat(40)).replaceAll(headSha.slice(0, 7), "f".repeat(7))]) {
+    const comments = [summaryComment(body), answer];
+    assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pass", body);
+    assert.equal(runGate([repeated, ...comments], reviews).status, 0);
   }
 });

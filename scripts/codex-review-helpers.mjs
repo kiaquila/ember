@@ -149,7 +149,8 @@ export function isCodexReviewWakeupComment(body) {
     .test(String(body || ""));
 }
 
-function codeReviewCompletedAt(body, headSha) {
+function codeReviewCompletedAt(body, headSha, section = "code_review") {
+  if (section === "security_review") body = body.replaceAll("📝 **Code Review**", "ignored-code-row").replaceAll("🛡️ **Security Review**", "📝 **Code Review**");
   const rows = [...body.matchAll(/^\| 📝 \*\*Code Review\*\* \| ✅ \*\*Completed\*\* <relative-time datetime="([^"]+)">([^<]+)<\/relative-time> \| `([a-f0-9]{7,40})` \| [^|\r\n]+ \|$/gm)];
   if (rows.length !== 1 || (body.match(/\*\*Code Review\*\*/g) || []).length !== 1) return NaN;
   const [, timestamp, visibleTime, sha] = rows[0];
@@ -196,6 +197,36 @@ export function isAffirmativeCodexReviewState(comment, headSha, requestedAt, req
   } catch { return false; }
 }
 
+// Historical findings must be well-formed typed state for this exact head;
+// stale malformed/foreign-head summaries are not persistent vetoes.
+function typedCodexReviewState(comment) {
+  const body = String(comment.body || "").trim();
+  const match = body.match(/^<!-- codex-pull-request-review-summary -->\s*<!-- codex-review-state:v1 (\{[^\r\n]*\}) -->\s*## Codex Review Summary\b/);
+  if (!match || (body.match(/<!--/g) || []).length !== 2 ||
+      (body.match(/codex-review-state:/g) || []).length !== 1 ||
+      /Codex Review:|\*\*Reviewed commit:/.test(body)) return null;
+  try {
+    const state = JSON.parse(match[1]);
+    const names = [...match[1].matchAll(/("(?:\\.|[^"\\])*")\s*:/g)].map((entry) => JSON.parse(entry[1]));
+    const expected = { code_review: 1, security_review: 1, commit_sha: 2, has_any_findings: 2, has_unresolved_findings: 2, status: 2 };
+    if (names.length !== 10 || Object.entries(expected).some(([key, count]) => names.filter((name) => name === key).length !== count) ||
+        Object.keys(state).length !== 2) return null;
+    const valid = (value) => value && !Array.isArray(value) && Object.keys(value).length === 4 &&
+      ["commit_sha", "has_any_findings", "has_unresolved_findings", "status"].every((key) => Object.hasOwn(value, key)) &&
+      (Object.values(value).every((entry) => entry === null) ||
+        (/^[a-f0-9]{40}$/.test(value.commit_sha) &&
+          ((value.status === "completed" && typeof value.has_any_findings === "boolean" && typeof value.has_unresolved_findings === "boolean") ||
+           (value.status === "running" && value.has_any_findings === null && value.has_unresolved_findings === null))));
+    if (!valid(state.code_review) || !valid(state.security_review)) return null;
+    if (state.code_review.status === "completed") {
+      const completed = codeReviewCompletedAt(body, state.code_review.commit_sha);
+      const observed = Date.parse(comment.updated_at || comment.created_at || "");
+      if (!Number.isFinite(completed) || !Number.isFinite(observed) || completed >= observed + 1000) return null;
+    }
+    return state;
+  } catch { return null; }
+}
+
 function latestCodexCommentResult(comments, headSha, requestedAt, requestCommentId, nativeCompletedAt = NaN) {
   const signals = comments.filter((comment) => isTrustedCodexLogin(comment?.user?.login));
   const summaries = signals.filter((comment) => /codex-pull-request-review-summary|codex-review-state:/.test(String(comment.body || "")) &&
@@ -221,7 +252,6 @@ function latestCodexCommentResult(comments, headSha, requestedAt, requestComment
   // Malformed envelopes and explicit P0-P2 findings remain unconditional vetoes.
   if (receipts.some((comment) => !isAcceptableCodexSummaryComment(comment, headSha, requestedAt, requestCommentId) && !isReceiptCandidate(comment))) return "pending";
   const candidates = [...summaries, ...receipts];
-  if (!candidates.length) return null;
   const observed = (comment) => summaries.includes(comment) &&
     isAffirmativeCodexReviewState(comment, headSha, requestedAt, requestCommentId)
     ? codeReviewCompletedAt(String(comment.body || ""), headSha)
@@ -234,19 +264,41 @@ function latestCodexCommentResult(comments, headSha, requestedAt, requestComment
   const latestTime = Math.max(...candidates.map(bucket));
   // A strictly newer formal clean review is independent affirmative evidence.
   // Same-second ambiguity and newer pending comments still prevent approval.
-  const lastAffirmativeTime = Math.max(...summaries.filter((comment) =>
-    isAffirmativeCodexReviewState(comment, headSha, requestedAt, requestCommentId)
-  ).map(bucket));
-  const unclearedFindings = summaries.some((comment) => bucket(comment) >= lastAffirmativeTime &&
-    [...String(comment.body || "").matchAll(/("(?:\\.|[^"\\])*")\s*:\s*(true|false|null)/g)]
-      .some((entry) => {
+  const sections = ["code_review", "security_review"];
+  const cleanSummaries = summaries.filter((comment) => isAffirmativeCodexReviewState(comment, headSha, requestedAt, requestCommentId));
+  const lastAffirmativeTime = (section) => Math.max(...cleanSummaries.filter((comment) => {
+    const value = typedCodexReviewState(comment)?.[section];
+    return value?.commit_sha === headSha && value.status === "completed" &&
+      value.has_any_findings === false && value.has_unresolved_findings === false;
+  }).map((comment) => {
+    const completed = codeReviewCompletedAt(String(comment.body || ""), headSha, section);
+    const observed = Date.parse(comment.updated_at || comment.created_at || "");
+    return Number.isFinite(completed) && completed <= observed + 999 ? Math.floor(completed / 1000) : -Infinity;
+  }));
+  const historical = signals.filter((comment) => {
+    const state = typedCodexReviewState(comment);
+    return sections.some((section) => state?.[section]?.commit_sha === headSha &&
+      (state[section].has_any_findings === true || state[section].has_unresolved_findings === true));
+  });
+  const findingSignals = [...new Set([...summaries, ...historical])];
+  const unclearedFindings = findingSignals.some((comment) => {
+    const state = typedCodexReviewState(comment);
+    const observedBucket = Math.floor(Date.parse(comment.updated_at || comment.created_at || "") / 1000);
+    if (state) return sections.some((section) => state[section].commit_sha === headSha &&
+      (state[section].has_any_findings === true || state[section].has_unresolved_findings === true) &&
+      observedBucket >= lastAffirmativeTime(section));
+    // Malformed current-request negative evidence retains its existing veto.
+    return summaries.includes(comment) && observedBucket >= Math.max(...cleanSummaries.map(bucket)) &&
+      [...String(comment.body || "").matchAll(/("(?:\\.|[^"\\])*")\s*:\s*(true|false|null)/g)].some((entry) => {
         if (entry[2] !== "true") return false;
         try { return ["has_any_findings", "has_unresolved_findings"].includes(JSON.parse(entry[1])); }
         catch { return true; }
-      }));
+      });
+  });
   // Code-only formal approval cannot revise an explicit code/security finding.
   // Only a newer affirmative structured state clears that independent signal.
   if (unclearedFindings) return "pending";
+  if (!candidates.length) return null;
   if (Math.floor(nativeCompletedAt / 1000) > latestTime) return "pass";
   const latest = candidates.filter((comment) => bucket(comment) === latestTime);
   return latest.every((comment) => summaries.includes(comment)

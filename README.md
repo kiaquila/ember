@@ -64,8 +64,11 @@ renew approval or outrank a later pending verdict. Unknown or negative receipt
 edits retain their update time so they can invalidate an older clean completion.
 
 A trusted exact-head clean formal review can also supersede strictly older
-pending summary evidence. Explicit structured code/security findings require
-newer affirmative structured proof; a formal code review cannot clear them.
+pending summary evidence. Valid exact-head structured findings survive a repeated request for that head.
+Code findings require newer affirmative code proof; security findings require
+newer completed false/false security proof for that head (null is insufficient).
+Malformed and foreign-head historical state cannot become permanent vetoes.
+Explicit structured code/security findings require newer affirmative structured proof; a formal code review cannot clear them.
 Its submission time uses the same second buckets;
 tied or newer pending comments still block, and malformed receipt envelopes,
 native findings and unresolved threads retain their vetoes.
