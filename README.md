@@ -42,15 +42,29 @@ cannot renew it. P0–P2 findings and every unresolved Codex review thread block
 success, even after another request. The gate rechecks HEAD after reading evidence.
 
 The rerun workflow reads trusted policy from the default branch and routes native
-formal reviews plus created/edited receipt and summary comments. The
-`codex-pull-request-review-summary` / `codex-review-state:v1` HTML is a wakeup
-signal only: neither its JSON, a Completed label nor a thumbs-up grants success.
-Reruns wait for an active gate and coalesce events already read by a later attempt.
+reviews and created/edited summary comments. Version 1 structured state now offers
+independent evidence: the official bot must report the full current head,
+`code_review.status: "completed"` and both finding flags exactly `false`.
+`security_review` must be all `null`, or the same exact-head completed/false/false
+state. Both objects have exactly four required fields; malformed JSON, duplicate
+keys, extra fields, unknown markers and versions fail closed. A fresh state update
+must follow the current trusted request, with IDs ordering same-second events.
+Newer non-clean state supersedes older clean state, including pending, malformed
+and wrong-head updates; ambiguous equal-time summaries fail closed.
 
-When this routing fix is itself under review, the default branch still has the
-old event filter. After the native connector posts a real current-head receipt,
-a maintainer can rerun the existing `Codex Review` Actions run with `gh run rerun
-<run-id> --repo kiaquila/ember`. The old trusted parser already accepts that
-receipt. This evaluates real review evidence using default-branch code; do not
-change checkout trust, fabricate a status, or merge around a failed gate. Once
-merged, subsequent native events use the corrected routing automatically.
+This intentionally replaces the old wakeup-only treatment of structured state.
+Headings, reactions and prose still cannot grant success. A new presentation
+closing such as `Swish!` or `Chef's kiss.` remains pending until a strictly newer
+affirmative machine summary supersedes it. A later or equal-time unfamiliar
+receipt requires a fresh summary; the receipt cannot pass alone. Strict legacy receipt validation remains
+the fallback. Malformed or contradictory receipts and native blocking findings
+or unresolved threads cannot be rescued by a clean machine summary. Reruns wait
+for an active gate and coalesce events already read by a later attempt.
+
+While this contract upgrade is under review, the trusted default-branch gate
+still requires its accepted legacy receipt or native formal review. Request real
+review for the exact PR head and rerun the existing Actions gate if necessary.
+New presentation prose plus structured state cannot make the old parser accept
+an unsupported format. Do not execute proposed scripts with write permission,
+fabricate a status, or bypass a failed gate. Subsequent reviews use this contract
+only after it has been merged normally.

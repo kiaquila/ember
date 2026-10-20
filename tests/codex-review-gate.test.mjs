@@ -2,7 +2,10 @@
    decisions live in the helpers, so they are exercised here directly. */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
 import { parse } from "yaml";
 import { fetchCodexReviewEvidence } from "../scripts/codex-review-gate.mjs";
 import test from "node:test";
@@ -318,7 +321,7 @@ test("receipts fail closed on stale, absent, ambiguous or conflicting evidence",
     receiptBody.replace("Didn't find any major issues.", "Found P1 issues."),
     receiptBody.replace("Didn't find any major issues.", "Review in progress."),
     `${stateBody}\n\n${receiptBody}`,
-    "Completed 👍", stateBody,
+    "Completed 👍",
     stateBody.replace('"completed"', '"in_progress"'),
     stateBody.replace('"has_any_findings":false', '"has_any_findings":true'),
     stateBody.replace(headSha, "f".repeat(40)),
@@ -331,9 +334,9 @@ test("receipts fail closed on stale, absent, ambiguous or conflicting evidence",
   assert.equal(isAcceptableCodexSummaryComment({ ...summaryComment(), user: { login: "github-actions[bot]" } }, headSha, requestedAt, "10"), false);
   assert.equal(isAcceptableCodexSummaryComment({ ...summaryComment(), created_at: requestedAt, id: 11 }, headSha, requestedAt, "10"), true);
   assert.equal(isAcceptableCodexSummaryComment({ ...summaryComment(), created_at: requestedAt, id: 9 }, headSha, requestedAt, "10"), false);
-  // Editing an old summary wakes the gate but cannot manufacture new evidence.
+  // A fresh machine-state update can complete a request; an edited receipt cannot.
   const edited = { ...summaryComment(stateBody), created_at: "2026-10-14T12:00:00Z", updated_at: answeredAt };
-  assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, edited] })), "pending");
+  assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, edited] })), "pass");
   assert.equal(isAcceptableCodexSummaryComment({ ...edited, body: receiptBody }, headSha, requestedAt, "10"), false);
 });
 
@@ -483,4 +486,94 @@ test("requeue aborts on a new push or closed PR and bounds active-run waiting", 
     request: async () => ({ workflow_runs: [{ ...completedRun, status: "in_progress" }] })
   }), /remained active/);
   assert.equal(sleeps, 2);
+});
+
+// Independent machine completion permits any neutral closing without teaching
+// the legacy receipt parser new phrases. The receipt itself remains strict.
+test("only newer structured proof supersedes an unfamiliar closing", () => {
+  const run = (answers) => evaluateCodexReviewEvidence(evidence({ comments: [command, ...answers] }));
+  const state = summaryComment(stateBody);
+  for (const suffix of ["Swish!", "Chef's kiss.", "Chef’s kiss.", "No worries!", "A whimsical flourish.", "Sunshine and confetti! 🎉"]) {
+    const answer = summaryComment(receiptBody.replace(":rocket:", suffix));
+    assert.equal(run([answer]), "pending");
+    for (const newerState of [true, false]) {
+      const later = { ...(newerState ? state : answer), id: 99, updated_at: "2026-10-15T22:00:00Z" };
+      const answers = newerState ? [answer, later] : [state, later];
+      assert.equal(run(answers), newerState ? "pass" : "pending", suffix);
+
+    }
+  }
+  for (const suffix of ["But there is a regression.", "Authentication leaks credentials.", "The deployment deletes all customer data.", "Status: completed", "Swish! <!-- unknown -->", "Swish!\nExtra line.", "P0 finding", "P1 finding", "P2 finding"]) {
+    assert.equal(run([state, summaryComment(receiptBody.replace(":rocket:", suffix))]), "pending", suffix);
+  }
+  for (const bad of [stateBody.replace('"completed"', '"running"'), stateBody.replace('"has_any_findings":false', '"has_any_findings":true'), stateBody.replace('"code_review":', '"code_review":{},"code_review":'), stateBody.replace('"status":"completed"', '"extra":false,"status":"completed"'), stateBody.replace('"status":"completed"', '"status":true'), stateBody.replace('"status":null', '"status":"running"'), stateBody.replace('"commit_sha":null', '"commit_sha":"' + "f".repeat(40) + '"'), stateBody.replace('"code_review":', '"code_review":broken'), stateBody + "\n<!-- codex-review-state:v1 {} -->"]) {
+    const newer = { ...summaryComment(bad), id: 100, updated_at: "2026-10-15T22:00:00Z" };
+    assert.equal(run([state, newer]), "pending", bad);
+
+  }
+  assert.equal(run([{ ...state, updated_at: "2026-10-15T19:00:00Z" }]), "pending");
+  assert.equal(run([{ ...state, user: { login: "fake-codex[bot]" } }]), "pending");
+});
+
+function runGate(comments) {
+  const directory = mkdtempSync(join(tmpdir(), "ember-gate-test-"));
+  try {
+    const fixture = { comments: [command, ...comments], headSha };
+    const preload = join(directory, "mock.mjs");
+    writeFileSync(preload, `const fixture = ${JSON.stringify(fixture)};
+      globalThis.fetch = async (url) => {
+        const path = new URL(url).pathname; let data;
+        if (path === '/graphql') data = { data: { repository: { pullRequest: { reviewThreads: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } } } } };
+        else if (path.endsWith('/pulls/1')) data = { head: { sha: fixture.headSha } };
+        else if (path.includes('/issues/1/comments')) data = fixture.comments;
+        else data = [];
+        return { ok: true, json: async () => data };
+      };`);
+    return spawnSync(process.execPath, ["--import", preload, resolve(import.meta.dirname, "../scripts/codex-review-gate.mjs")], {
+      encoding: "utf8", env: { ...process.env, GITHUB_TOKEN: "test-token", GITHUB_REPOSITORY: "owner/repo", CODEX_REVIEW_PR_NUMBER: "1", CODEX_REVIEW_HEAD_SHA: headSha, CODEX_REVIEW_WAIT_MS: "1", CODEX_REVIEW_POLL_MS: "1", CODEX_REVIEW_DEBOUNCE_MS: "0", GITHUB_STEP_SUMMARY: "" }
+    });
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+}
+
+test("executed gate requires independent state for unfamiliar closings", () => {
+  const state = summaryComment(stateBody);
+  const opaque = summaryComment(receiptBody.replace(":rocket:", "Swish!"));
+  for (const comments of [[state], [opaque, { ...state, updated_at: "2026-10-15T22:00:00Z" }]]) {
+    const result = runGate(comments);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Codex Review passed/);
+  }
+  for (const comments of [[state, { ...opaque, updated_at: "2026-10-15T22:00:00Z" }], [state, opaque], [opaque], [{ ...state, updated_at: "2026-10-15T19:00:00Z" }],
+    [state, { ...summaryComment(stateBody.replace('"completed"', '"running"')), updated_at: "2026-10-15T22:00:00Z" }],
+    [state, summaryComment(receiptBody.replace(":rocket:", "P2 finding"))],
+    [summaryComment(stateBody.replace('"status":null', '"status":"running"'))],
+    [summaryComment(stateBody.replace('"code_review":', '"code_review":{},"code_review":'))]]) {
+    assert.equal(runGate(comments).status, 1);
+  }
+});
+
+test("latest malformed, negative or ambiguous summary supersedes clean state", () => {
+  const run = (comments) => evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments] }));
+  const clean = summaryComment(stateBody);
+  for (const body of [stateBody.replace("state:v1", "state:v2"), stateBody.replace('"completed"', '"pending"'), stateBody.replace('"commit_sha":"', '"commit_sha":"f'), stateBody + "\nP0: blocker", stateBody + "\n**Reviewed commit:** `abcdef0123`", stateBody.replace('"status":"completed"', '"status":"completed","status":"completed"')]) {
+    const invalid = { ...summaryComment(body), id: 1 };
+    assert.equal(run([clean, invalid]), "pending", body);
+    assert.equal(run([invalid, clean]), "pending", body);
+    assert.equal(run([clean, { ...invalid, updated_at: "2026-10-15T22:00:00Z" }]), "pending", body);
+  }
+});
+
+test("visible contradictions and latest pending state veto positive formal review", () => {
+  const reviews = [{ id: 1, commit_id: headSha, state: "COMMENTED", user: codexUser, submitted_at: answeredAt }];
+  const run = (comments) => evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments], reviews }));
+  for (const body of [stateBody.replace("## Codex Review Summary", "## Unknown Summary"), stateBody.replace("## Codex Review Summary", "## Codex Review Summary\nFound unresolved issues."), stateBody.replace("## Codex Review Summary", "## Codex Review Summary\nSecurity Review failed."), stateBody.replace("## Codex Review Summary", "## Codex Review Summary\nCode Review running."), stateBody.replace('"completed"', '"running"'), stateBody.replace('"status":null', '"status":"running"')]) {
+    assert.equal(run([summaryComment(body)]), "pending", body);
+  }
+});
+
+test("affirmative machine state never hides native P0-P2 findings", () => {
+  for (const priority of [0, 1, 2]) {
+    const reviews = [{ id: 1, commit_id: headSha, state: "COMMENTED", user: codexUser, submitted_at: answeredAt, body: `P${priority}: actionable finding` }];
+    assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, summaryComment(stateBody)], reviews })), "fail");
+  }
 });
