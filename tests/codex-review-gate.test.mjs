@@ -663,3 +663,12 @@ test("a fresh completion supersedes an eligible pre-request receipt edit", () =>
   assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments] })), "pending");
   assert.equal(runGate(comments).status, 1);
 });
+
+
+test("a mutable summary edit tied with the request stays pending despite its old ID", () => {
+  const updated = { ...summaryComment(stateBody.replace('"completed"', '"running"')), id: 9, created_at: "2026-10-15T19:00:00Z", updated_at: requestedAt };
+  const answer = { ...summaryComment(receiptBody), id: 11, created_at: requestedAt, updated_at: requestedAt };
+  const comments = [updated, answer];
+  assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments] })), "pending", "the lower ID dates creation, not the edit within this second");
+  assert.equal(runGate(comments).status, 1);
+});
