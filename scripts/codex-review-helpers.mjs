@@ -203,7 +203,7 @@ function latestCodexCommentResult(comments, headSha, requestedAt, requestComment
   summaries.sort((a, b) => (Date.parse(b.updated_at || b.created_at || "") || 0) -
     (Date.parse(a.updated_at || a.created_at || "") || 0) || compareNumericIds(b.id, a.id));
   const receipts = signals.filter((comment) => /Codex Review:|codex-review-receipt:/.test(String(comment.body || "")) &&
-    Date.parse(comment.updated_at || comment.created_at || "") >= Date.parse(requestedAt || ""));
+    Date.parse(comment.created_at || "") >= Date.parse(requestedAt || ""));
   const isReceiptCandidate = (comment) => {
     const body = String(comment.body || "");
     const match = body.match(/(Codex Review: Didn't find any major issues\.)([^\r\n]*)/);
@@ -221,7 +221,8 @@ function latestCodexCommentResult(comments, headSha, requestedAt, requestComment
   const observed = (comment) => summaries.includes(comment) &&
     isAffirmativeCodexReviewState(comment, headSha, requestedAt, requestCommentId)
     ? codeReviewCompletedAt(String(comment.body || ""), headSha)
-    : Date.parse(comment.updated_at || comment.created_at || "");
+    : Date.parse(summaries.includes(comment) ? comment.updated_at || comment.created_at || "" : comment.created_at || "");
+  // Receipt edits never renew their creation-bound evidence.
   // GitHub comment timestamps have second precision while completion rows
   // include microseconds. Compare second buckets so uncertainty stays pending.
   const bucket = (comment) => Math.floor(observed(comment) / 1000);

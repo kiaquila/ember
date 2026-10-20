@@ -59,6 +59,9 @@ newer affirmative machine completion independently supersedes that unstructured
 text. Later or same-second unfamiliar text requires a fresh completion. The
 legacy receipt parser remains strict and arbitrary prose never grants success.
 
+Receipt freshness and ordering use creation time; editing a receipt cannot renew
+its evidence or outrank a later pending verdict.
+
 The visible code-review row must name the same head and a valid completion time
 strictly after the trusted request. Evidence order uses that code completion
 time, rather than summary `updated_at`, so a security-only edit cannot renew old
