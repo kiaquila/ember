@@ -228,6 +228,21 @@ function typedCodexReviewState(comment) {
   } catch { return null; }
 }
 
+// Validate a section's clearing proof with the same presentation checks as
+// approval, while allowing an independently pending/absent other section.
+function isSectionClearingState(comment, section, headSha) {
+  const state = typedCodexReviewState(comment);
+  const body = String(comment.body || "");
+  if (!state || /\bP[0-2]\b/i.test(body)) return false;
+  const encoded = body.match(/codex-review-state:v1 (\{[^\r\n]*\}) -->/)[1];
+  const absent = { commit_sha: null, has_any_findings: null, has_unresolved_findings: null, status: null };
+  const other = section === "code_review" ? "Security Review" : "Code Review";
+  let normalized = body.replace(encoded, JSON.stringify({ code_review: state[section], security_review: absent }))
+    .split("\n").filter((line) => !line.startsWith("| " + (other === "Code Review" ? "📝" : "🛡️") + " **" + other + "** | ")).join("\n");
+  if (section === "security_review") normalized = normalized.replaceAll("🛡️ **Security Review**", "📝 **Code Review**");
+  return isAffirmativeCodexReviewState({ ...comment, body: normalized }, headSha, "1970-01-01T00:00:00Z", 0);
+}
+
 function findingCompletedAt(comment, section, headSha) {
   const completed = codeReviewCompletedAt(String(comment.body || ""), headSha, section);
   const observed = Date.parse(comment.updated_at || comment.created_at || "");
@@ -284,7 +299,8 @@ function latestCodexCommentResult(comments, headSha, requestedAt, requestComment
   const lastAffirmativeTime = (section) => Math.max(...cleanSummaries.filter((comment) => {
     const value = typedCodexReviewState(comment)?.[section];
     return value?.commit_sha === headSha && value.status === "completed" &&
-      value.has_any_findings === false && value.has_unresolved_findings === false;
+      value.has_any_findings === false && value.has_unresolved_findings === false &&
+      isSectionClearingState(comment, section, headSha);
   }).map((comment) => {
     const completed = codeReviewCompletedAt(String(comment.body || ""), headSha, section);
     const observed = Date.parse(comment.updated_at || comment.created_at || "");
