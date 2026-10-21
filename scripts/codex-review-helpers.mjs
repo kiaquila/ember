@@ -161,8 +161,19 @@ function codeReviewCompletedAt(body, headSha, section = "code_review") {
 
 /** Affirmative machine evidence has a closed schema and the full current SHA.
  * Prose, reactions and the visible Completed heading never grant approval. */
+function hasIndentedProtocolMarkers(rawBody) {
+  // Indented Markdown code is not an active protocol envelope. Check before trim.
+  for (const marker of rawBody.matchAll(/<!--([\s\S]*?)-->/g)) {
+    if (!/^codex[-:]/.test(marker[1].trim())) continue;
+    const prefix = rawBody.slice(rawBody.lastIndexOf("\n", marker.index - 1) + 1, marker.index);
+    if (/^[ \t]*$/.test(prefix) && (prefix.includes("\t") || prefix.length >= 4)) return true;
+  }
+  return false;
+}
+
 export function isAffirmativeCodexReviewState(comment, headSha, requestedAt, requestCommentId) {
   if (!isTrustedCodexLogin(comment?.user?.login) || !/^[a-f0-9]{40}$/.test(headSha)) return false;
+  if (hasIndentedProtocolMarkers(String(comment?.body || ""))) return false;
   const body = String(comment?.body || "").trim();
   const match = body.match(/^<!-- codex-pull-request-review-summary -->\s*<!-- codex-review-state:v1 (\{[^\r\n]*\}) -->/);
   if (!match || (body.match(/<!--/g) || []).length !== 2 ||
@@ -201,12 +212,7 @@ export function isAffirmativeCodexReviewState(comment, headSha, requestedAt, req
 // stale malformed/foreign-head summaries are not persistent vetoes.
 function typedCodexReviewState(comment) {
   const rawBody = String(comment.body || "");
-  // Indented Markdown code is not an active protocol envelope. Check before trim.
-  for (const marker of rawBody.matchAll(/<!--([\s\S]*?)-->/g)) {
-    if (!/^codex[-:]/.test(marker[1].trim())) continue;
-    const prefix = rawBody.slice(rawBody.lastIndexOf("\n", marker.index - 1) + 1, marker.index);
-    if (/^[ \t]*$/.test(prefix) && (prefix.includes("\t") || prefix.length >= 4)) return null;
-  }
+  if (hasIndentedProtocolMarkers(rawBody)) return null;
   const body = rawBody.trim();
   const envelope = body.replace(/<!--([\s\S]*?)-->/g, (marker, content) => /^codex[-:]/.test(content.trim()) ? marker : "").trim();
   const match = envelope.match(/^<!-- codex-pull-request-review-summary -->\s*<!-- codex-review-state:v1 (\{[\s\S]*?\}) -->\s*## Codex Review Summary\b/);

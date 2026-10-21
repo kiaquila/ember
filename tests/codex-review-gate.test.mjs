@@ -557,10 +557,11 @@ test("executed gate requires independent state for unfamiliar closings", () => {
 test("latest malformed, negative or ambiguous summary supersedes clean state", () => {
   const run = (comments) => evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments] }));
   const clean = summaryComment(stateBody);
-  for (const body of [stateBody.replace("state:v1", "state:v2"), stateBody.replace('"completed"', '"pending"'), stateBody.replace('"commit_sha":"', '"commit_sha":"f'), stateBody + "\nP0: blocker", stateBody + "\n**Reviewed commit:** `abcdef0123`", stateBody.replace('"status":"completed"', '"status":"completed","status":"completed"')]) {
+  for (const body of [stateBody.replace(/^<!--/gm, "    <!--"), stateBody.replace(/^<!--/gm, "\t<!--"), stateBody.replace(/^(<!-- codex-review-state:)/m, "    $1"), stateBody.replace("state:v1", "state:v2"), stateBody.replace('"completed"', '"pending"'), stateBody.replace('"commit_sha":"', '"commit_sha":"f'), stateBody + "\nP0: blocker", stateBody + "\n**Reviewed commit:** `abcdef0123`", stateBody.replace('"status":"completed"', '"status":"completed","status":"completed"')]) {
     const invalid = { ...summaryComment(body), id: 1 };
     assert.equal(run([clean, invalid]), "pending", body);
     assert.equal(run([invalid, clean]), "pending", body);
+    assert.notEqual(runGate([clean, invalid]).status, 0, body);
     assert.equal(run([clean, { ...invalid, updated_at: "2026-10-15T22:00:00Z" }]), "pending", body);
   }
 });
