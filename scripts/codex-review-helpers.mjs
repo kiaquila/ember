@@ -201,9 +201,12 @@ export function isAffirmativeCodexReviewState(comment, headSha, requestedAt, req
 // stale malformed/foreign-head summaries are not persistent vetoes.
 function typedCodexReviewState(comment) {
   const body = String(comment.body || "").trim();
-  const match = body.match(/^<!-- codex-pull-request-review-summary -->\s*<!-- codex-review-state:v1 (\{[^\r\n]*\}) -->\s*## Codex Review Summary\b/);
-  if (!match || (body.match(/<!--/g) || []).length !== 2 ||
+  const match = body.match(/<!-- codex-review-state:v1 (\{[\s\S]*?\}) -->/);
+  const protocol = [...body.matchAll(/<!--([\s\S]*?)-->/g)].filter((entry) => /^codex[-:]/.test(entry[1].trim()));
+  if (!match || protocol.length !== 2 ||
+      (body.match(/<!-- codex-pull-request-review-summary -->/g) || []).length !== 1 ||
       (body.match(/codex-review-state:/g) || []).length !== 1 ||
+      !/^## Codex Review Summary\b/m.test(body) ||
       /Codex Review:|\*\*Reviewed commit:/.test(body)) return null;
   try {
     const state = JSON.parse(match[1]);
@@ -234,7 +237,9 @@ function isSectionClearingState(comment, section, headSha) {
   const state = typedCodexReviewState(comment);
   const body = String(comment.body || "");
   if (!state) return false;
-  const encoded = body.match(/codex-review-state:v1 (\{[^\r\n]*\}) -->/)[1];
+  const encodedMatch = body.match(/codex-review-state:v1 (\{[^\r\n]*\}) -->/);
+  if (!encodedMatch) return false;
+  const encoded = encodedMatch[1];
   const absent = { commit_sha: null, has_any_findings: null, has_unresolved_findings: null, status: null };
   const other = section === "code_review" ? "Security Review" : "Code Review";
   const otherSection = section === "code_review" ? "security_review" : "code_review";
