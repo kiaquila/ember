@@ -90,30 +90,44 @@ function visibleMarkdownLinkLabels(text) {
       else if (text[cursor] === ")") depth -= 1;
     }
     const destination = text.slice(match.index + match[0].length, cursor - 1);
-    if (depth || /\s/.test(destination.replace(/\\./g, ""))) continue;
+    const target = destination.trim();
+    const bare = target.replace(/\\[^\s]/g, "");
+    const titled = target.match(/^(<[^<>\r\n]*>|[^\s]+)[ \t\r\n]+(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\((?:[^()\\]|\\.)*\))[ \t\r\n]*$/);
+    const linkTarget = titled ? titled[1] : target;
+    if (depth || (/\s/.test(bare) && !titled) || (/[<>]/.test(linkTarget) && !/^<[^<>\r\n]*>$/.test(linkTarget))) continue;
     result += text.slice(consumed, match.index) + match[1];
     consumed = cursor;
   }
   const definitions = new Set([...text.matchAll(/^ {0,3}\[([^\]]+)\]:\s+\S+/gm)].map((entry) => entry[1].trim().replace(/\s+/g, " ").toLowerCase()));
-  return (result + text.slice(consumed)).replace(/\[([^\]]*)\]\[([^\]]*)\]/g, (source, label, reference) => definitions.has((reference || label).trim().replace(/\s+/g, " ").toLowerCase()) ? label : source);
+  const references = (result + text.slice(consumed)).replace(/\[([^\]]*)\]\[([^\]]*)\]/g, (source, label, reference) => definitions.has((reference || label).trim().replace(/\s+/g, " ").toLowerCase()) ? label : source);
+  return references.replace(/\[([^\]]+)\](?![\[(])/g, (source, label) => definitions.has(label.trim().replace(/\s+/g, " ").toLowerCase()) ? label : source);
 }
 
 // Normalize only human-visible negative evidence; protocol and clocks stay raw.
 function visibleCodexReviewText(value) {
-  const text = visibleMarkdownLinkLabels(String(value || "").replace(/&#(x[0-9a-f]+|[0-9]+);/gi, (entity, digits) => {
+  // Parse raw structural delimiters before decoding text entities: an encoded
+  // quote is attribute data, and an encoded angle bracket cannot create a tag.
+  const raw = String(value || "").replace(/<!--[\s\S]*?(?:-->|$)/g, (comment) => comment.replace(/[^\r\n]/g, ""));
+  const images = raw.replace(/<img\b((?:[^"'<>]|"[^"]*"|'[^']*')*)>/gi, (tag, attributes) => {
+    const alt = attributes.match(/(?:^|\s)alt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/i);
+    return alt ? " " + alt.slice(1).find((value) => value !== undefined) + " " : " ";
+  });
+  const decode = (text) => text.replace(/&#(x[0-9a-f]+|[0-9]+);/gi, (entity, digits) => {
     const point = digits[0].toLowerCase() === "x" ? parseInt(digits.slice(1), 16) : parseInt(digits, 10);
     return point > 0 && point <= 0x10ffff && !(point >= 0xd800 && point <= 0xdfff) ? String.fromCodePoint(point) : entity;
-  }).replace(/&([A-Za-z][A-Za-z0-9]*);/g, (entity, name) => Object.hasOwn(HTML_SPACING_ENTITIES, name) ? HTML_SPACING_ENTITIES[name] : entity)
-    ).replace(/<img\b((?:[^"'<>]|"[^"]*"|'[^']*')*)>/gi, (tag, attributes) => {
-      const alt = attributes.match(/(?:^|\s)alt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/i);
-      return alt ? " " + alt.slice(1).find((value) => value !== undefined) + " " : " ";
-    }).replace(/[*_~`]/g, "");
-  // Either joining or separating invisible formatting may expose a warning.
-  return [text.replace(/<(?:[^"'<>]|"[^"]*"|'[^']*')*>/g, ""), text.replace(/<(?:[^"'<>]|"[^"]*"|'[^']*')*>/g, " ")].flatMap((visible) => [visible.replace(/\p{Default_Ignorable_Code_Point}/gu, ""), visible.replace(/\p{Default_Ignorable_Code_Point}/gu, " ")]).join(" ").replace(/\s+/g, " ");
+  }).replace(/&([A-Za-z][A-Za-z0-9]*);/g, (entity, name) => Object.hasOwn(HTML_SPACING_ENTITIES, name) ? HTML_SPACING_ENTITIES[name] : entity);
+  return ["", " "].flatMap((separator) => {
+    const visible = decode(visibleMarkdownLinkLabels(images.replace(/<(?:[^"'<>]|"[^"]*"|'[^']*')*>/g, separator))).replace(/[*_~`]/g, "");
+    return [visible.replace(/\p{Default_Ignorable_Code_Point}/gu, ""), visible.replace(/\p{Default_Ignorable_Code_Point}/gu, " ")];
+  }).join(" ").replace(/\s+/g, " ");
+}
+
+function hasContradictoryCodexPresentation(body) {
+  return /\b(?:found|unresolved|issues?|findings?|failed|failure|running|pending|cancelled|incomplete|in.progress|not.completed|changes.requested|security.concerns?|do.not.merge|P[0-2])\b/i.test(visibleCodexReviewText(body));
 }
 
 function hasRenderedCodexSectionRow(body, label) {
-  return String(body || "").split("\n").some((line) => line.includes("|") && visibleCodexReviewText(line).includes(label));
+  return String(body || "").split("\n").some((line) => line.includes("|") && visibleCodexReviewText(line).toLowerCase().includes(label.toLowerCase()));
 }
 
 export function containsBlockingCodexSeverity(body) {
@@ -198,6 +212,15 @@ function codeReviewCompletedAt(body, headSha, section = "code_review") {
   if (isProtocolCodeExample(body, rows[0].index)) return NaN;
   const preceding = body.slice(0, rows[0].index);
   if (preceding.lastIndexOf("<!--") > preceding.lastIndexOf("-->")) return NaN;
+  const rawBlocks = [];
+  for (const tag of preceding.replace(/<!--[\s\S]*?-->/g, "").matchAll(/<\/?(pre|code|div)\b(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi)) {
+    const name = tag[1].toLowerCase();
+    if (tag[0].startsWith("</")) {
+      const opened = rawBlocks.lastIndexOf(name);
+      if (opened !== -1) rawBlocks.splice(opened, 1);
+    } else rawBlocks.push(name);
+  }
+  if (rawBlocks.length) return NaN;
   const [, timestamp, visibleTime, sha] = rows[0];
   if (timestamp !== visibleTime || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z$/.test(timestamp) || !headSha.startsWith(sha)) return NaN;
   const completed = Date.parse(timestamp);
@@ -240,7 +263,7 @@ export function isAffirmativeCodexReviewState(comment, headSha, requestedAt, req
   if (!match || (body.match(/<!--/g) || []).length !== 2 ||
       (body.match(/codex-review-state:/g) || []).length !== 1 ||
       (body.match(/codex-pull-request-review-summary/g) || []).length !== 1 ||
-      /Codex Review:|\*\*Reviewed commit:/i.test(body) || containsBlockingCodexSeverity(body) || /\bdo.not.merge\b/i.test(visibleCodexReviewText(body))) return false;
+      /Codex Review:|\*\*Reviewed commit:/i.test(body) || containsBlockingCodexSeverity(body) || hasContradictoryCodexPresentation(body)) return false;
   const presentation = body.slice(match[0].length).replace(/\s*<details>\s*<summary>ℹ️ About Codex in GitHub<\/summary>[\s\S]*<\/details>\s*$/, "");
   if (!/^(?:[ \t]*\r?\n)* {0,3}## Codex Review Summary\b/.test(presentation) ||
       /<details>|<summary>|\b(?:found|unresolved|issues?|findings?|failed|failure|running|pending|cancelled|incomplete|in.progress|not.completed|changes.requested|security.concerns?|do.not.merge|P[0-2])\b/i.test(visibleCodexReviewText(presentation))) return false;
@@ -327,7 +350,7 @@ function isSectionClearingState(comment, section, headSha) {
   const severityBody = state[otherSection].status === "completed"
     ? body.split("\n").filter((line) => !line.startsWith(otherPrefix)).join("\n") : body;
   if (/\bP[0-2]\b/i.test(visibleCodexReviewText(severityBody))) return false;
-  const otherRows = body.split("\n").filter((line) => visibleCodexReviewText(line).includes(other));
+  const otherRows = body.split("\n").filter((line) => visibleCodexReviewText(line).toLowerCase().includes(other.toLowerCase()));
   if (otherRows.some((line) => !line.startsWith(otherPrefix))) return false;
   if (otherRows.length && state[otherSection].status !== "completed") {
     if (state[otherSection].status !== "running") return false;
@@ -344,7 +367,7 @@ function isSectionClearingState(comment, section, headSha) {
 }
 
 function findingCompletedAt(comment, section, headSha) {
-  if (/\bdo.not.merge\b/i.test(visibleCodexReviewText(comment.body))) return Date.parse(comment.updated_at || comment.created_at || "");
+  if (hasContradictoryCodexPresentation(comment.body)) return Date.parse(comment.updated_at || comment.created_at || "");
   const presentation = String(comment.body || "").replace(/\s*<details>\s*<summary>ℹ️ About Codex in GitHub<\/summary>[\s\S]*<\/details>\s*$/, "");
   if (/\b(?:P[0-2]|failed|failure|do.not.merge|found\s+(?:[1-9]\d*\s+)?issues?)\b/i.test(visibleCodexReviewText(presentation))) return Date.parse(comment.updated_at || comment.created_at || "");
   const state = typedCodexReviewState(comment, { negativeOnly: true });
