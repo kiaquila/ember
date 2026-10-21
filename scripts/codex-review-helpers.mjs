@@ -100,15 +100,35 @@ function preserveLiteralMarkdownLinks(text) {
     const close = tail.search(new RegExp("</" + tag[1] + "\\s*>", "i"));
     spans.push([tag.index + tag[0].length, close === -1 ? text.length : tag.index + tag[0].length + close]);
   }
-  return text.replace(/\[/g, (bracket, index) => {
-    const indentation = text.slice(text.lastIndexOf("\n", index - 1) + 1, index).match(/^[ \t]*/)[0];
+  return text.replace(/[&<\[]/g, (bracket, index) => {
+    const context = text.slice(0, index).split("\n").map((line) => {
+      let previous;
+      do {
+        previous = line;
+        line = line.replace(/^ {0,3}>[ \t]?/, "").replace(/^ {0,3}(?:[-+*]|[0-9]{1,9}[.)])[ \t]/, "");
+      } while (line !== previous);
+      return line;
+    }).join("\n");
+    const indentation = context.slice(context.lastIndexOf("\n") + 1).match(/^[ \t]*/)[0];
     return spans.some(([start, end]) => index >= start && index < end) ||
       indentation.includes("\t") || indentation.length >= 4 ||
-      isProtocolCodeExample(text, index) ? "&#91;" : bracket;
+      isProtocolCodeExample(context, context.length) ? ({ "[": "&#91;", "<": "&#60;", "&": "&#38;" })[bracket] : bracket;
   });
 }
 
+function isVisibleLinkDestination(destination, allowEmpty = true) {
+  destination = destination.replace(/\r\n?/g, "\n");
+  if (/\r?\n[ \t\f\v]*\r?\n/.test(destination)) return false;
+  const target = destination.replace(/^[ \t\r\n\f\v]+|[ \t\r\n\f\v]+$/g, "");
+  if (!target) return allowEmpty;
+  const bare = target.replace(/\\[!-/:-@[-`{-~]/g, "");
+  const titled = target.match(/^(<[^<>\r\n]*>|[^ \t\r\n\f\v]+)[ \t\r\n\f\v]+(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\((?:[^()\\]|\\.)*\))[ \t\r\n\f\v]*$/);
+  const linkTarget = titled ? titled[1] : target;
+  return !(/[ \t\r\n\f\v]/.test(bare) && !titled) && !(/[<>]/.test(linkTarget) && !/^<[^<>\r\n]*>$/.test(linkTarget));
+}
+
 function visibleMarkdownLinkLabels(text) {
+  text = text.replace(/\r\n?/g, "\n");
   let result = "";
   let consumed = 0;
   for (const match of text.matchAll(/\[((?:\\.|[^\]\\])*)\]\(/g)) {
@@ -121,15 +141,16 @@ function visibleMarkdownLinkLabels(text) {
       else if (text[cursor] === ")") depth -= 1;
     }
     const destination = text.slice(match.index + match[0].length, cursor - 1);
-    const target = destination.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, "");
-    const bare = target.replace(/\\[^\s]/g, "");
-    const titled = target.match(/^(<[^<>\r\n]*>|[^\s]+)[ \t\r\n]+(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\((?:[^()\\]|\\.)*\))[ \t\r\n]*$/);
-    const linkTarget = titled ? titled[1] : target;
-    if (depth || (/\s/.test(bare) && !titled) || (/[<>]/.test(linkTarget) && !/^<[^<>\r\n]*>$/.test(linkTarget))) continue;
+    if (depth || !isVisibleLinkDestination(destination)) continue;
     result += text.slice(consumed, match.index) + match[1];
     consumed = cursor;
   }
-  const definitions = new Set([...text.matchAll(/^ {0,3}\[([^\]]+)\]:\s+\S+/gm)].map((entry) => entry[1].trim().replace(/\s+/g, " ").toLowerCase()));
+  const definitions = new Set();
+  const definitionPattern = /^ {0,3}\[((?:\\.|[^\]\\])+)\]:[ \t\f\v]*(?:\r?\n[ \t\f\v]*)?([^\r\n]+)(?:\r?\n[ \t\f\v]*((?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\((?:[^()\\]|\\.)*\))))?[ \t\f\v]*$/gm;
+  for (const entry of text.matchAll(definitionPattern)) {
+    const destination = entry[2] + (entry[3] ? " " + entry[3] : "");
+    if (isVisibleLinkDestination(destination, false)) definitions.add(entry[1].trim().replace(/\s+/g, " ").toLowerCase());
+  }
   const references = (result + text.slice(consumed)).replace(/\[([^\]]*)\]\[([^\]]*)\]/g, (source, label, reference, offset, whole) => !isEscapedMarkdownStart(whole, offset) && definitions.has((reference || label).trim().replace(/\s+/g, " ").toLowerCase()) ? label : source);
   return references.replace(/\[([^\]]+)\](?![\[(])/g, (source, label, offset, whole) => !isEscapedMarkdownStart(whole, offset) && definitions.has(label.trim().replace(/\s+/g, " ").toLowerCase()) ? label : source);
 }
@@ -276,6 +297,8 @@ function isRawHtmlRowContext(body, index) {
 }
 
 function codeReviewCompletedAt(body, headSha, section = "code_review") {
+  const renderedLabel = section === "security_review" ? "Security Review" : "Code Review";
+  if (String(body).split("\n").filter((line) => hasRenderedCodexSectionRow(line, renderedLabel)).length !== 1) return NaN;
   body = body.replace(/\s*<details>\s*<summary>ℹ️ About Codex in GitHub<\/summary>[\s\S]*<\/details>\s*$/, "");
   if (section === "security_review") body = body.replaceAll("📝 **Code Review**", "ignored-code-row").replaceAll("🛡️ **Security Review**", "📝 **Code Review**");
   const rows = [...body.matchAll(/^\| 📝 \*\*Code Review\*\* \| ✅ \*\*Completed\*\* <relative-time datetime="([^"]+)">([^<]+)<\/relative-time> \| `([a-f0-9]{7,40})` \| [^|\r\n]+ \|$/gm)];
