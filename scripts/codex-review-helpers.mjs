@@ -200,7 +200,14 @@ export function isAffirmativeCodexReviewState(comment, headSha, requestedAt, req
 // Historical findings must be well-formed typed state for this exact head;
 // stale malformed/foreign-head summaries are not persistent vetoes.
 function typedCodexReviewState(comment) {
-  const body = String(comment.body || "").trim();
+  const rawBody = String(comment.body || "");
+  // Indented Markdown code is not an active protocol envelope. Check before trim.
+  for (const marker of rawBody.matchAll(/<!--([\s\S]*?)-->/g)) {
+    if (!/^codex[-:]/.test(marker[1].trim())) continue;
+    const prefix = rawBody.slice(rawBody.lastIndexOf("\n", marker.index - 1) + 1, marker.index);
+    if (/^[ \t]*$/.test(prefix) && (prefix.includes("\t") || prefix.length >= 4)) return null;
+  }
+  const body = rawBody.trim();
   const envelope = body.replace(/<!--([\s\S]*?)-->/g, (marker, content) => /^codex[-:]/.test(content.trim()) ? marker : "").trim();
   const match = envelope.match(/^<!-- codex-pull-request-review-summary -->\s*<!-- codex-review-state:v1 (\{[\s\S]*?\}) -->\s*## Codex Review Summary\b/);
   const protocol = [...body.matchAll(/<!--([\s\S]*?)-->/g)].filter((entry) => /^codex[-:]/.test(entry[1].trim()));
