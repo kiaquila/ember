@@ -77,11 +77,15 @@ export function extractCodexPriority(body) {
 
 // HTML5 named entities whose expansion is whitespace or Unicode format text.
 const HTML_SPACING_ENTITIES = {"ApplyFunction": "\u2061", "InvisibleComma": "\u2063", "InvisibleTimes": "\u2062", "MediumSpace": "\u205f", "NegativeMediumSpace": "\u200b", "NegativeThickSpace": "\u200b", "NegativeThinSpace": "\u200b", "NegativeVeryThinSpace": "\u200b", "NewLine": "\n", "NoBreak": "\u2060", "NonBreakingSpace": "\u00a0", "Tab": "\t", "ThickSpace": "\u205f\u200a", "ThinSpace": "\u2009", "VeryThinSpace": "\u200a", "ZeroWidthSpace": "\u200b", "af": "\u2061", "emsp": "\u2003", "emsp13": "\u2004", "emsp14": "\u2005", "ensp": "\u2002", "hairsp": "\u200a", "ic": "\u2063", "it": "\u2062", "lrm": "\u200e", "nbsp": "\u00a0", "numsp": "\u2007", "puncsp": "\u2008", "rlm": "\u200f", "shy": "\u00ad", "thinsp": "\u2009", "zwj": "\u200d", "zwnj": "\u200c"};
+function isEscapedMarkdownStart(text, index) {
+  return ((text.slice(0, index).match(/\\+$/)?.[0].length || 0) % 2) === 1;
+}
+
 function visibleMarkdownLinkLabels(text) {
   let result = "";
   let consumed = 0;
   for (const match of text.matchAll(/\[([^\]]*)\]\(/g)) {
-    if (match.index < consumed) continue;
+    if (match.index < consumed || isEscapedMarkdownStart(text, match.index)) continue;
     let depth = 1;
     let cursor = match.index + match[0].length;
     for (; cursor < text.length && depth; cursor += 1) {
@@ -90,7 +94,7 @@ function visibleMarkdownLinkLabels(text) {
       else if (text[cursor] === ")") depth -= 1;
     }
     const destination = text.slice(match.index + match[0].length, cursor - 1);
-    const target = destination.trim();
+    const target = destination.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, "");
     const bare = target.replace(/\\[^\s]/g, "");
     const titled = target.match(/^(<[^<>\r\n]*>|[^\s]+)[ \t\r\n]+(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\((?:[^()\\]|\\.)*\))[ \t\r\n]*$/);
     const linkTarget = titled ? titled[1] : target;
@@ -99,8 +103,8 @@ function visibleMarkdownLinkLabels(text) {
     consumed = cursor;
   }
   const definitions = new Set([...text.matchAll(/^ {0,3}\[([^\]]+)\]:\s+\S+/gm)].map((entry) => entry[1].trim().replace(/\s+/g, " ").toLowerCase()));
-  const references = (result + text.slice(consumed)).replace(/\[([^\]]*)\]\[([^\]]*)\]/g, (source, label, reference) => definitions.has((reference || label).trim().replace(/\s+/g, " ").toLowerCase()) ? label : source);
-  return references.replace(/\[([^\]]+)\](?![\[(])/g, (source, label) => definitions.has(label.trim().replace(/\s+/g, " ").toLowerCase()) ? label : source);
+  const references = (result + text.slice(consumed)).replace(/\[([^\]]*)\]\[([^\]]*)\]/g, (source, label, reference, offset, whole) => !isEscapedMarkdownStart(whole, offset) && definitions.has((reference || label).trim().replace(/\s+/g, " ").toLowerCase()) ? label : source);
+  return references.replace(/\[([^\]]+)\](?![\[(])/g, (source, label, offset, whole) => !isEscapedMarkdownStart(whole, offset) && definitions.has(label.trim().replace(/\s+/g, " ").toLowerCase()) ? label : source);
 }
 
 // Normalize only human-visible negative evidence; protocol and clocks stay raw.
@@ -204,6 +208,46 @@ export function isCodexReviewWakeupComment(body) {
     .test(String(body || ""));
 }
 
+// GFM raw HTML blocks cannot supply a live Markdown status-table row.
+function isRawHtmlRowContext(body, index) {
+  const prefix = body.slice(0, index).replace(/<!--[\s\S]*?(?:-->|$)/g, (comment) => comment.replace(/[^\r\n]/g, ""));
+  const blockTags = new Set("address article aside base basefont blockquote body caption center col colgroup dd details dialog dir div dl dt fieldset figcaption figure footer form frame frameset h1 h2 h3 h4 h5 h6 head header hr html iframe legend li link main menu menuitem nav noframes ol optgroup option p param search section summary table tbody td tfoot th thead title tr track ul".split(" "));
+  const voidTags = new Set("area base basefont br col embed frame hr img input link meta param source track wbr".split(" "));
+  const containers = [];
+  let until = null;
+  let untilBlank = false;
+  let offset = 0;
+  for (const line of (prefix.endsWith("\n") ? prefix.slice(0, -1) : prefix).split("\n")) {
+    const lineOffset = offset;
+    offset += line.length + 1;
+    if (isProtocolCodeExample(prefix, lineOffset + (line.match(/^ */)?.[0].length || 0))) continue;
+    if (until) { if (until.test(line)) until = null; continue; }
+    const raw = line.match(/^ {0,3}<(script|pre|style|textarea)(?=[\s>])/i);
+    if (raw) {
+      const end = new RegExp("</" + raw[1] + "\\s*>", "i");
+      if (!end.test(line)) until = end;
+      continue;
+    }
+    if (/^ {0,3}<\?/.test(line)) { if (!line.includes("?>")) until = /\?>/; continue; }
+    if (/^ {0,3}<!\[CDATA\[/.test(line)) { if (!line.includes("]]>")) until = /\]\]>/; continue; }
+    if (/^ {0,3}<![A-Z]/.test(line)) { if (!line.includes(">")) until = />/; continue; }
+    if (!line.trim()) untilBlank = false;
+    const start = line.match(/^ {0,3}<\/?([a-z][a-z0-9-]*)(?=[\s/>])/i);
+    const completeTag = /^ {0,3}<\/?[a-z][a-z0-9-]*(?:[^"'<>]|"[^"]*"|'[^']*')*>[ \t]*$/i.test(line);
+    if (start && (blockTags.has(start[1].toLowerCase()) || completeTag)) untilBlank = true;
+    if (start || containers.length) {
+      for (const tag of line.matchAll(/<\/?([a-z][a-z0-9-]*)\b(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi)) {
+        const name = tag[1].toLowerCase();
+        if (tag[0].startsWith("</")) {
+          const opened = containers.lastIndexOf(name);
+          if (opened !== -1) containers.splice(opened, 1);
+        } else if (!voidTags.has(name) && !tag[0].endsWith("/>")) containers.push(name);
+      }
+    }
+  }
+  return Boolean(until || untilBlank || containers.length);
+}
+
 function codeReviewCompletedAt(body, headSha, section = "code_review") {
   body = body.replace(/\s*<details>\s*<summary>ℹ️ About Codex in GitHub<\/summary>[\s\S]*<\/details>\s*$/, "");
   if (section === "security_review") body = body.replaceAll("📝 **Code Review**", "ignored-code-row").replaceAll("🛡️ **Security Review**", "📝 **Code Review**");
@@ -212,15 +256,7 @@ function codeReviewCompletedAt(body, headSha, section = "code_review") {
   if (isProtocolCodeExample(body, rows[0].index)) return NaN;
   const preceding = body.slice(0, rows[0].index);
   if (preceding.lastIndexOf("<!--") > preceding.lastIndexOf("-->")) return NaN;
-  const rawBlocks = [];
-  for (const tag of preceding.replace(/<!--[\s\S]*?-->/g, "").matchAll(/<\/?(pre|code|div)\b(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi)) {
-    const name = tag[1].toLowerCase();
-    if (tag[0].startsWith("</")) {
-      const opened = rawBlocks.lastIndexOf(name);
-      if (opened !== -1) rawBlocks.splice(opened, 1);
-    } else rawBlocks.push(name);
-  }
-  if (rawBlocks.length) return NaN;
+  if (isRawHtmlRowContext(body, rows[0].index)) return NaN;
   const [, timestamp, visibleTime, sha] = rows[0];
   if (timestamp !== visibleTime || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z$/.test(timestamp) || !headSha.startsWith(sha)) return NaN;
   const completed = Date.parse(timestamp);
