@@ -201,7 +201,8 @@ export function isAffirmativeCodexReviewState(comment, headSha, requestedAt, req
 // stale malformed/foreign-head summaries are not persistent vetoes.
 function typedCodexReviewState(comment) {
   const body = String(comment.body || "").trim();
-  const match = body.match(/<!-- codex-review-state:v1 (\{[\s\S]*?\}) -->/);
+  const envelope = body.replace(/<!--([\s\S]*?)-->/g, (marker, content) => /^codex[-:]/.test(content.trim()) ? marker : "").trim();
+  const match = envelope.match(/^<!-- codex-pull-request-review-summary -->\s*<!-- codex-review-state:v1 (\{[\s\S]*?\}) -->\s*## Codex Review Summary\b/);
   const protocol = [...body.matchAll(/<!--([\s\S]*?)-->/g)].filter((entry) => /^codex[-:]/.test(entry[1].trim()));
   if (!match || protocol.length !== 2 ||
       (body.match(/<!-- codex-pull-request-review-summary -->/g) || []).length !== 1 ||
