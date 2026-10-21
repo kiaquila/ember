@@ -233,10 +233,17 @@ function typedCodexReviewState(comment) {
 function isSectionClearingState(comment, section, headSha) {
   const state = typedCodexReviewState(comment);
   const body = String(comment.body || "");
-  if (!state || /\bP[0-2]\b/i.test(body)) return false;
+  if (!state) return false;
   const encoded = body.match(/codex-review-state:v1 (\{[^\r\n]*\}) -->/)[1];
   const absent = { commit_sha: null, has_any_findings: null, has_unresolved_findings: null, status: null };
   const other = section === "code_review" ? "Security Review" : "Code Review";
+  const otherSection = section === "code_review" ? "security_review" : "code_review";
+  const otherPrefix = "| " + (other === "Code Review" ? "📝" : "🛡️") + " **" + other + "** | ";
+  // Only a unique validated completed counterpart row scopes its severity.
+  // Global prose and unvalidated rows remain ambiguous vetoes.
+  const severityBody = state[otherSection].status === "completed"
+    ? body.split("\n").filter((line) => !line.startsWith(otherPrefix)).join("\n") : body;
+  if (/\bP[0-2]\b/i.test(severityBody)) return false;
   let normalized = body.replace(encoded, JSON.stringify({ code_review: state[section], security_review: absent }))
     .split("\n").filter((line) => !line.startsWith("| " + (other === "Code Review" ? "📝" : "🛡️") + " **" + other + "** | ")).join("\n");
   if (section === "security_review") normalized = normalized.replaceAll("🛡️ **Security Review**", "📝 **Code Review**");

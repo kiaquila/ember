@@ -751,6 +751,22 @@ test("same-head repeated requests retain typed findings until matching newer mac
       assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pass", "a repeated request does not resurrect a finding already cleared before it");
       assert.equal(runGate([repeated, ...comments], reviews).status, 0);
       comments.pop();
+      {
+        const encoded = priorClean.body.match(/codex-review-state:v1 (\{[^\r\n]*\}) -->/)[1];
+        const state = JSON.parse(encoded);
+        const other = section === "code_review" ? "security_review" : "code_review";
+        state[other].has_any_findings = true;
+        const label = other === "code_review" ? "Code Review" : "Security Review";
+        const scoped = { ...priorClean, body: priorClean.body.replace(encoded, JSON.stringify(state)).split("\n").map((line) => line.includes("**" + label + "**") ? line.replace("Manual request", "Manual request P1") : line).join("\n") };
+        const recoveryState = JSON.parse(encoded);
+        recoveryState[section] = { commit_sha: null, has_any_findings: null, has_unresolved_findings: null, status: null };
+        const ownLabel = section === "code_review" ? "Code Review" : "Security Review";
+        const recovery = { ...priorClean, updated_at: "2026-10-15T21:45:00Z", body: priorClean.body.replace(encoded, JSON.stringify(recoveryState)).split("\n").filter((line) => !line.includes("**" + ownLabel + "**")).join("\n").replaceAll("2026-10-15T21:30:00Z", "2026-10-15T21:45:00Z") };
+        comments.push(scoped, recovery);
+        assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pass", "severity in a validated other-section row does not discard independent clearing");
+        assert.equal(runGate([repeated, ...comments], reviews).status, 0);
+        comments.splice(-2);
+      }
       for (const status of [null, "running"]) {
         const encoded = priorClean.body.match(/codex-review-state:v1 (\{[^\r\n]*\}) -->/)[1];
         const state = JSON.parse(encoded);
