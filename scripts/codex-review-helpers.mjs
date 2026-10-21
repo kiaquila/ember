@@ -81,10 +81,37 @@ function isEscapedMarkdownStart(text, index) {
   return ((text.slice(0, index).match(/\\+$/)?.[0].length || 0) % 2) === 1;
 }
 
+// Code contexts display link syntax literally; protect their opening bracket
+// until visible entities are decoded, after all Markdown transformations.
+function preserveLiteralMarkdownLinks(text) {
+  const spans = [];
+  let consumed = 0;
+  const ticks = [...text.matchAll(/`+/g)];
+  for (let i = 0; i < ticks.length; i += 1) {
+    const start = ticks[i];
+    if (start.index < consumed || isEscapedMarkdownStart(text, start.index)) continue;
+    const end = ticks.slice(i + 1).find((entry) => entry[0].length === start[0].length);
+    if (!end) continue;
+    spans.push([start.index, end.index + end[0].length]);
+    consumed = end.index + end[0].length;
+  }
+  for (const tag of text.matchAll(/<(code|pre|script|style|textarea)\b(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi)) {
+    const tail = text.slice(tag.index + tag[0].length);
+    const close = tail.search(new RegExp("</" + tag[1] + "\\s*>", "i"));
+    spans.push([tag.index + tag[0].length, close === -1 ? text.length : tag.index + tag[0].length + close]);
+  }
+  return text.replace(/\[/g, (bracket, index) => {
+    const indentation = text.slice(text.lastIndexOf("\n", index - 1) + 1, index).match(/^[ \t]*/)[0];
+    return spans.some(([start, end]) => index >= start && index < end) ||
+      indentation.includes("\t") || indentation.length >= 4 ||
+      isProtocolCodeExample(text, index) ? "&#91;" : bracket;
+  });
+}
+
 function visibleMarkdownLinkLabels(text) {
   let result = "";
   let consumed = 0;
-  for (const match of text.matchAll(/\[([^\]]*)\]\(/g)) {
+  for (const match of text.matchAll(/\[((?:\\.|[^\]\\])*)\]\(/g)) {
     if (match.index < consumed || isEscapedMarkdownStart(text, match.index)) continue;
     let depth = 1;
     let cursor = match.index + match[0].length;
@@ -112,7 +139,7 @@ function visibleCodexReviewText(value) {
   // Parse raw structural delimiters before decoding text entities: an encoded
   // quote is attribute data, and an encoded angle bracket cannot create a tag.
   const raw = String(value || "").replace(/<!--[\s\S]*?(?:-->|$)/g, (comment) => comment.replace(/[^\r\n]/g, ""));
-  const images = raw.replace(/<img\b((?:[^"'<>]|"[^"]*"|'[^']*')*)>/gi, (tag, attributes) => {
+  const images = preserveLiteralMarkdownLinks(raw).replace(/<img\b((?:[^"'<>]|"[^"]*"|'[^']*')*)>/gi, (tag, attributes) => {
     const alt = attributes.match(/(?:^|\s)alt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/i);
     return alt ? " " + alt.slice(1).find((value) => value !== undefined) + " " : " ";
   });
@@ -121,7 +148,7 @@ function visibleCodexReviewText(value) {
     return point > 0 && point <= 0x10ffff && !(point >= 0xd800 && point <= 0xdfff) ? String.fromCodePoint(point) : entity;
   }).replace(/&([A-Za-z][A-Za-z0-9]*);/g, (entity, name) => Object.hasOwn(HTML_SPACING_ENTITIES, name) ? HTML_SPACING_ENTITIES[name] : entity);
   return ["", " "].flatMap((separator) => {
-    const visible = decode(visibleMarkdownLinkLabels(images.replace(/<(?:[^"'<>]|"[^"]*"|'[^']*')*>/g, separator))).replace(/[*_~`]/g, "");
+    const visible = decode(visibleMarkdownLinkLabels(images.replace(/<\/?[A-Za-z][A-Za-z0-9-]*(?:[ \t\r\n]+[A-Za-z_:][A-Za-z0-9_.:-]*(?:[ \t\r\n]*=[ \t\r\n]*(?:"[^"]*"|'[^']*'|[^ \t\r\n"'=<>`]+))?)*[ \t\r\n]*\/?>/g, separator))).replace(/[*_~`]/g, "");
     return [visible.replace(/\p{Default_Ignorable_Code_Point}/gu, ""), visible.replace(/\p{Default_Ignorable_Code_Point}/gu, " ")];
   }).join(" ").replace(/\s+/g, " ");
 }
