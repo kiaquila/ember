@@ -161,25 +161,35 @@ function codeReviewCompletedAt(body, headSha, section = "code_review") {
 
 /** Affirmative machine evidence has a closed schema and the full current SHA.
  * Prose, reactions and the visible Completed heading never grant approval. */
-function isIndentedMarker(rawBody, index) {
-  const prefix = rawBody.slice(rawBody.lastIndexOf("\n", index - 1) + 1, index);
-  return /^[ \t]*$/.test(prefix) && (prefix.includes("\t") || prefix.length >= 4);
+function isProtocolCodeExample(rawBody, index) {
+  const prefix = rawBody.slice(rawBody.lastIndexOf("\n", index - 1) + 1, index).replace(/^\uFEFF/, "");
+  if (/^[ \t]*$/.test(prefix) && (prefix.includes("\t") || prefix.length >= 4)) return true;
+  let fence = null;
+  for (const line of rawBody.slice(0, index).replace(/^\uFEFF/, "").split("\n")) {
+    const match = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    if (!match) continue;
+    if (!fence) {
+      if (match[1][0] === "`" && match[2].includes("`")) continue;
+      fence = match[1];
+    } else if (match[1][0] === fence[0] && match[1].length >= fence.length && !match[2].trim()) fence = null;
+  }
+  return fence !== null;
 }
 
-function hasIndentedProtocolMarkers(rawBody) {
-  // Indented Markdown code is not an active protocol envelope. Check before trim.
+function hasCodeProtocolEnvelope(rawBody) {
+  // Markdown code is not an active protocol envelope. Check before trim.
   let count = 0;
   for (const marker of rawBody.matchAll(/<!--([\s\S]*?)-->/g)) {
     if (!/^codex[-:]/i.test(marker[1].trim())) continue;
     if (count++ >= 2) break;
-    if (isIndentedMarker(rawBody, marker.index)) return true;
+    if (isProtocolCodeExample(rawBody, marker.index)) return true;
   }
   return false;
 }
 
 export function isAffirmativeCodexReviewState(comment, headSha, requestedAt, requestCommentId) {
   if (!isTrustedCodexLogin(comment?.user?.login) || !/^[a-f0-9]{40}$/.test(headSha)) return false;
-  if (hasIndentedProtocolMarkers(String(comment?.body || ""))) return false;
+  if (hasCodeProtocolEnvelope(String(comment?.body || ""))) return false;
   const body = String(comment?.body || "").trim();
   const match = body.match(/^<!-- codex-pull-request-review-summary -->\s*<!-- codex-review-state:v1 (\{[^\r\n]*\}) -->/);
   if (!match || (body.match(/<!--/g) || []).length !== 2 ||
@@ -218,9 +228,9 @@ export function isAffirmativeCodexReviewState(comment, headSha, requestedAt, req
 // stale malformed/foreign-head summaries are not persistent vetoes.
 function typedCodexReviewState(comment) {
   const rawBody = String(comment.body || "");
-  if (hasIndentedProtocolMarkers(rawBody)) return null;
+  if (hasCodeProtocolEnvelope(rawBody)) return null;
   const body = rawBody.replace(/<!--([\s\S]*?)-->/g, (marker, content, index) =>
-    /^codex[-:]/i.test(content.trim()) && isIndentedMarker(rawBody, index) ? "" : marker).trim();
+    /^codex[-:]/i.test(content.trim()) && isProtocolCodeExample(rawBody, index) ? "" : marker).trim();
   const envelope = body.replace(/<!--([\s\S]*?)-->/g, (marker, content) => /^codex[-:]/i.test(content.trim()) ? marker : "").trim();
   const match = envelope.match(/^<!-- codex-pull-request-review-summary -->\s*<!-- codex-review-state:v1 (\{[\s\S]*?\}) -->\s*## Codex Review Summary\b/);
   const protocol = [...body.matchAll(/<!--([\s\S]*?)-->/g)].filter((entry) => /^codex[-:]/i.test(entry[1].trim()));
@@ -269,7 +279,8 @@ function isSectionClearingState(comment, section, headSha) {
   const severityBody = state[otherSection].status === "completed"
     ? body.split("\n").filter((line) => !line.startsWith(otherPrefix)).join("\n") : body;
   if (/\bP[0-2]\b/i.test(severityBody)) return false;
-  const otherRows = body.split("\n").filter((line) => line.startsWith(otherPrefix));
+  const otherRows = body.split("\n").filter((line) => line.includes("**" + other + "**"));
+  if (otherRows.some((line) => !line.startsWith(otherPrefix))) return false;
   if (otherRows.length && state[otherSection].status !== "completed") {
     if (state[otherSection].status !== "running") return false;
     if (otherRows.length !== 1 || !otherRows[0].startsWith(otherPrefix + "🔄 **Running** since <relative-time")) return false;

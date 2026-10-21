@@ -557,7 +557,7 @@ test("executed gate requires independent state for unfamiliar closings", () => {
 test("latest malformed, negative or ambiguous summary supersedes clean state", () => {
   const run = (comments) => evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments] }));
   const clean = summaryComment(stateBody);
-  for (const body of [stateBody.replaceAll("codex-", "CODEX-"), stateBody.replaceAll("codex-", "CoDeX-"), stateBody.replace(/^<!--/gm, "    <!--"), stateBody.replace(/^<!--/gm, "\t<!--"), stateBody.replace(/^(<!-- codex-review-state:)/m, "    $1"), stateBody.replace("state:v1", "state:v2"), stateBody.replace('"completed"', '"pending"'), stateBody.replace('"commit_sha":"', '"commit_sha":"f'), stateBody + "\nP0: blocker", stateBody + "\n**Reviewed commit:** `abcdef0123`", stateBody.replace('"status":"completed"', '"status":"completed","status":"completed"')]) {
+  for (const body of ["\uFEFF" + stateBody.replace(/^<!--/, "    <!--"), "\uFEFF" + stateBody.replace(/^<!--/, "\t<!--"), stateBody.replaceAll("codex-", "CODEX-"), stateBody.replaceAll("codex-", "CoDeX-"), stateBody.replace(/^<!--/gm, "    <!--"), stateBody.replace(/^<!--/gm, "\t<!--"), stateBody.replace(/^(<!-- codex-review-state:)/m, "    $1"), stateBody.replace("state:v1", "state:v2"), stateBody.replace('"completed"', '"pending"'), stateBody.replace('"commit_sha":"', '"commit_sha":"f'), stateBody + "\nP0: blocker", stateBody + "\n**Reviewed commit:** `abcdef0123`", stateBody.replace('"status":"completed"', '"status":"completed","status":"completed"')]) {
     const invalid = { ...summaryComment(body), id: 1 };
     assert.equal(run([clean, invalid]), "pending", body);
     assert.equal(run([invalid, clean]), "pending", body);
@@ -738,7 +738,7 @@ test("same-head repeated requests retain typed findings until matching newer mac
       const source = section === "security_review" ? withSecurityProof(stateBody) : stateBody;
       const body = source.replace(new RegExp('("' + section + '":\\{[^}]*"' + field + '":)(?:false|null)'), '$1true');
       const encodedNegative = body.match(/codex-review-state:v1 (\{[^\r\n]*\}) -->/)[1];
-      for (const formattedBody of [body + "\n    <!-- codex-review-state:v1 example -->", body + "\n\t<!-- codex-pull-request-review-summary -->", body + "\nThe codex-review-state: parser has a defect.", "<!-- TODO -->\n" + body, body.replace(encodedNegative, JSON.stringify(JSON.parse(encodedNegative), null, 2)), body + "\n<!-- TODO -->", body.replace("<!-- codex-review-state:", "<!-- TODO -->\n<!-- codex-review-state:")]) {
+      for (const formattedBody of [body + "\n```html\n<!-- codex-review-state:v1 example -->\n```", body + "\n~~~html\n<!-- codex-pull-request-review-summary -->\n~~~", body + "\n    <!-- codex-review-state:v1 example -->", body + "\n\t<!-- codex-pull-request-review-summary -->", body + "\nThe codex-review-state: parser has a defect.", "<!-- TODO -->\n" + body, body.replace(encodedNegative, JSON.stringify(JSON.parse(encodedNegative), null, 2)), body + "\n<!-- TODO -->", body.replace("<!-- codex-review-state:", "<!-- TODO -->\n<!-- codex-review-state:")]) {
         const formatted = summaryComment(formattedBody);
         assert.equal(runGate([repeated, formatted, answer], reviews).status, 1);
         assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, formatted, answer], reviews })), "pending", "valid typed historical findings survive JSON whitespace and unrelated HTML comments");
@@ -806,6 +806,11 @@ test("same-head repeated requests retain typed findings until matching newer mac
           comments.pop();
         }
         const malformedOther = { ...partial, body: partial.body + "\n| " + (label === "Code Review" ? "📝" : "🛡️") + " **" + label + "** | ⚠️ Do not merge | `" + headSha.slice(0, 7) + "` | Manual request |" };
+        const firstCellWarning = { ...malformedOther, body: malformedOther.body.replace("| " + (label === "Code Review" ? "📝" : "🛡️") + " **" + label + "**", "| ⚠️ Do not merge " + (label === "Code Review" ? "📝" : "🛡️") + " **" + label + "**") };
+        comments.push(firstCellWarning);
+        assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pending", "a warning before the companion label cannot be ignored");
+        assert.equal(runGate([repeated, ...comments], reviews).status, 1);
+        comments.pop();
         comments.push(malformedOther);
         assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pending", "a noncanonical companion row cannot be discarded during clearing");
         assert.equal(runGate([repeated, ...comments], reviews).status, 1);
@@ -845,7 +850,7 @@ test("historical malformed and foreign-head state cannot become persistent findi
   const answer = { ...summaryComment(receiptBody), created_at: "2026-10-15T23:00:00Z", updated_at: "2026-10-15T23:00:00Z" };
   const negative = stateBody.replace('"has_any_findings":false', '"has_any_findings":true');
   const securityNegative = withSecurityProof(stateBody).replace(/("security_review":\{[^}]*"has_any_findings":)false/, "$1true");
-  for (const body of [negative.replace(/^<!--/gm, "    <!--"), negative.replace(/^<!--/gm, "\t<!--"), negative.replace(/^(<!-- codex-review-state:)/m, "    $1"), "```json\n" + negative + "\n```", negative.split("\n").map((line) => "> " + line).join("\n"), securityNegative.replace(/^\| 🛡️ \*\*Security Review\*\*.*$/m, ""), securityNegative.replace(/(🛡️ \*\*Security Review\*\*.*datetime=")[^"]+/, "$1invalid"), negative.replace('state:v1', 'state:v2'), negative.replace('"code_review":', '"code_review":broken'), negative.replace('"code_review":', '"code_review":{},"code_review":'), negative + "\n<!-- codex-unknown -->", negative + "\n<!-- CODEX-unknown -->", negative + "\n<!-- CoDeX-unknown -->", negative.replaceAll(headSha, "f".repeat(40)).replaceAll(headSha.slice(0, 7), "f".repeat(7))]) {
+  for (const body of ["\uFEFF" + negative.replace(/^<!--/, "    <!--"), "\uFEFF" + negative.replace(/^<!--/, "\t<!--"), negative.replace(/^<!--/gm, "    <!--"), negative.replace(/^<!--/gm, "\t<!--"), negative.replace(/^(<!-- codex-review-state:)/m, "    $1"), "```json\n" + negative + "\n```", negative.split("\n").map((line) => "> " + line).join("\n"), securityNegative.replace(/^\| 🛡️ \*\*Security Review\*\*.*$/m, ""), securityNegative.replace(/(🛡️ \*\*Security Review\*\*.*datetime=")[^"]+/, "$1invalid"), negative.replace('state:v1', 'state:v2'), negative.replace('"code_review":', '"code_review":broken'), negative.replace('"code_review":', '"code_review":{},"code_review":'), negative + "\n<!-- codex-unknown -->", negative + "\n<!-- CODEX-unknown -->", negative + "\n<!-- CoDeX-unknown -->", negative.replaceAll(headSha, "f".repeat(40)).replaceAll(headSha.slice(0, 7), "f".repeat(7))]) {
     const comments = [summaryComment(body), answer];
     assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pass", body);
     assert.equal(runGate([repeated, ...comments], reviews).status, 0);
