@@ -198,8 +198,8 @@ export function isAffirmativeCodexReviewState(comment, headSha, requestedAt, req
       (body.match(/codex-pull-request-review-summary/g) || []).length !== 1 ||
       /Codex Review:|\*\*Reviewed commit:|\bP[0-2]\b/i.test(body)) return false;
   const presentation = body.slice(match[0].length).replace(/\s*<details>\s*<summary>ℹ️ About Codex in GitHub<\/summary>[\s\S]*<\/details>\s*$/, "");
-  if (!/^\s*## Codex Review Summary\b/.test(presentation) ||
-      /<details>|<summary>|\b(?:found|unresolved|issues?|findings?|failed|failure|running|pending|cancelled|incomplete|in.progress|not.completed|changes.requested|security.concerns?|do.not.merge)\b/i.test(presentation.replaceAll("**", ""))) return false;
+  if (!/^(?:[ \t]*\r?\n)* {0,3}## Codex Review Summary\b/.test(presentation) ||
+      /<details>|<summary>|\b(?:found|unresolved|issues?|findings?|failed|failure|running|pending|cancelled|incomplete|in.progress|not.completed|changes.requested|security.concerns?|do.not.merge)\b/i.test(presentation.replaceAll("**", "").replaceAll("&nbsp;", " "))) return false;
   if ([...presentation.matchAll(/\b[a-f0-9]{7,40}\b/gi)].some(([sha]) => !headSha.startsWith(sha))) return false;
   const observed = Date.parse(comment.updated_at || comment.created_at || "");
   const requested = Date.parse(requestedAt || "");
@@ -301,7 +301,7 @@ function isSectionClearingState(comment, section, headSha) {
 
 function findingCompletedAt(comment, section, headSha) {
   const presentation = String(comment.body || "").replace(/\s*<details>\s*<summary>ℹ️ About Codex in GitHub<\/summary>[\s\S]*<\/details>\s*$/, "");
-  if (/\b(?:P[0-2]|failed|failure|do.not.merge)\b/i.test(presentation.replaceAll("**", ""))) return Date.parse(comment.updated_at || comment.created_at || "");
+  if (/\b(?:P[0-2]|failed|failure|do.not.merge)\b/i.test(presentation.replaceAll("**", "").replaceAll("&nbsp;", " "))) return Date.parse(comment.updated_at || comment.created_at || "");
   const completed = codeReviewCompletedAt(String(comment.body || ""), headSha, section);
   const observed = Date.parse(comment.updated_at || comment.created_at || "");
   return Number.isFinite(completed) && completed <= observed + 999 ? completed : observed;

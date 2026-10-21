@@ -557,7 +557,7 @@ test("executed gate requires independent state for unfamiliar closings", () => {
 test("latest malformed, negative or ambiguous summary supersedes clean state", () => {
   const run = (comments) => evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments] }));
   const clean = summaryComment(stateBody);
-  for (const body of [stateBody.replace("Manual request", "Do not merge"), stateBody.replace("Manual request", "Do **not** merge"), "<!-- TODO -->\n<!-- codex-review-state:v1 {broken} -->", stateBody.replace(/^(\| 📝 \*\*Code Review\*\*.*)$/m, "```html\n$1\n```"), "\uFEFF" + stateBody.replace(/^<!--/, "    <!--"), "\uFEFF" + stateBody.replace(/^<!--/, "\t<!--"), stateBody.replaceAll("codex-", "CODEX-"), stateBody.replaceAll("codex-", "CoDeX-"), stateBody.replace(/^<!--/gm, "    <!--"), stateBody.replace(/^<!--/gm, "\t<!--"), stateBody.replace(/^(<!-- codex-review-state:)/m, "    $1"), stateBody.replace("state:v1", "state:v2"), stateBody.replace('"completed"', '"pending"'), stateBody.replace('"commit_sha":"', '"commit_sha":"f'), stateBody + "\nP0: blocker", stateBody + "\n**Reviewed commit:** `abcdef0123`", stateBody.replace('"status":"completed"', '"status":"completed","status":"completed"')]) {
+  for (const body of [stateBody.replace(/^(\| 📝 \*\*Code Review\*\*.*)$/m, "```html\n$1\n````"), stateBody.replace("Manual request", "Do not merge"), stateBody.replace("Manual request", "Do not&nbsp;merge"), stateBody.replace("## Codex Review Summary", "    ## Codex Review Summary"), stateBody.replace("## Codex Review Summary", "\t## Codex Review Summary"), stateBody.replace("Manual request", "Do **not** merge"), "<!-- TODO -->\n<!-- codex-review-state:v1 {broken} -->", stateBody.replace(/^(\| 📝 \*\*Code Review\*\*.*)$/m, "```html\n$1\n```"), "\uFEFF" + stateBody.replace(/^<!--/, "    <!--"), "\uFEFF" + stateBody.replace(/^<!--/, "\t<!--"), stateBody.replaceAll("codex-", "CODEX-"), stateBody.replaceAll("codex-", "CoDeX-"), stateBody.replace(/^<!--/gm, "    <!--"), stateBody.replace(/^<!--/gm, "\t<!--"), stateBody.replace(/^(<!-- codex-review-state:)/m, "    $1"), stateBody.replace("state:v1", "state:v2"), stateBody.replace('"completed"', '"pending"'), stateBody.replace('"commit_sha":"', '"commit_sha":"f'), stateBody + "\nP0: blocker", stateBody + "\n**Reviewed commit:** `abcdef0123`", stateBody.replace('"status":"completed"', '"status":"completed","status":"completed"')]) {
     const invalid = { ...summaryComment(body), id: 1 };
     assert.equal(run([clean, invalid]), "pending", body);
     assert.equal(run([invalid, clean]), "pending", body);
@@ -837,6 +837,8 @@ test("same-head repeated requests retain typed findings until matching newer mac
       for (const visibleNegative of ["Found P1 issues.", "Security review failed."]) {
         const edited = { ...comments[0], body: comments[0].body + "\n" + visibleNegative };
         assert.equal(runGate([repeated, edited, ...comments.slice(1)], reviews).status, 1, "new visible negative evidence uses update time");
+        const recovery = { ...summaryComment(withSecurityProof(stateBody).replaceAll(answeredAt, "2026-10-16T02:00:00Z")), updated_at: "2026-10-16T02:00:00Z" };
+        assert.equal(runGate([repeated, edited, ...comments.slice(1), recovery], reviews).status, 0, "newer canonical completion clears edited explicit findings");
       }
       if (section === "code_review") {
         const original = comments[0].body;
