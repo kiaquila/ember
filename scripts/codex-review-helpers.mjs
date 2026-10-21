@@ -153,6 +153,7 @@ function codeReviewCompletedAt(body, headSha, section = "code_review") {
   if (section === "security_review") body = body.replaceAll("📝 **Code Review**", "ignored-code-row").replaceAll("🛡️ **Security Review**", "📝 **Code Review**");
   const rows = [...body.matchAll(/^\| 📝 \*\*Code Review\*\* \| ✅ \*\*Completed\*\* <relative-time datetime="([^"]+)">([^<]+)<\/relative-time> \| `([a-f0-9]{7,40})` \| [^|\r\n]+ \|$/gm)];
   if (rows.length !== 1 || (body.match(/\*\*Code Review\*\*/g) || []).length !== 1) return NaN;
+  if (isProtocolCodeExample(body, rows[0].index)) return NaN;
   const [, timestamp, visibleTime, sha] = rows[0];
   if (timestamp !== visibleTime || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z$/.test(timestamp) || !headSha.startsWith(sha)) return NaN;
   const completed = Date.parse(timestamp);
@@ -198,7 +199,7 @@ export function isAffirmativeCodexReviewState(comment, headSha, requestedAt, req
       /Codex Review:|\*\*Reviewed commit:|\bP[0-2]\b/i.test(body)) return false;
   const presentation = body.slice(match[0].length).replace(/\s*<details>\s*<summary>ℹ️ About Codex in GitHub<\/summary>[\s\S]*<\/details>\s*$/, "");
   if (!/^\s*## Codex Review Summary\b/.test(presentation) ||
-      /<details>|<summary>|\b(?:found|unresolved|issues?|findings?|failed|failure|running|pending|cancelled|incomplete|in.progress|not.completed|changes.requested|security.concerns?)\b/i.test(presentation)) return false;
+      /<details>|<summary>|\b(?:found|unresolved|issues?|findings?|failed|failure|running|pending|cancelled|incomplete|in.progress|not.completed|changes.requested|security.concerns?|do.not.merge)\b/i.test(presentation.replaceAll("**", ""))) return false;
   if ([...presentation.matchAll(/\b[a-f0-9]{7,40}\b/gi)].some(([sha]) => !headSha.startsWith(sha))) return false;
   const observed = Date.parse(comment.updated_at || comment.created_at || "");
   const requested = Date.parse(requestedAt || "");
@@ -239,7 +240,7 @@ function typedCodexReviewState(comment, { negativeOnly = false } = {}) {
   const protocol = [...protocolBody.matchAll(/<!--([\s\S]*?)-->/g)].filter((entry) => /^codex[-:]/i.test(entry[1].trim()));
   if (!match || protocol.length !== 2 ||
       (protocolBody.match(/<!-- codex-pull-request-review-summary -->/g) || []).length !== 1 ||
-      !/^## Codex Review Summary\b/m.test(body) ||
+      !/^ {0,3}## Codex Review Summary\b/m.test(body) ||
       /Codex Review:|\*\*Reviewed commit:/.test(protocolBody)) return null;
   try {
     const state = JSON.parse(match[1]);
@@ -255,7 +256,7 @@ function typedCodexReviewState(comment, { negativeOnly = false } = {}) {
            (value.status === "running" && value.has_any_findings === null && value.has_unresolved_findings === null))));
     if (!valid(state.code_review) || !valid(state.security_review)) return null;
     for (const section of ["code_review", "security_review"]) {
-      if (state[section].status !== "completed") continue;
+      if (negativeOnly || state[section].status !== "completed") continue;
       const completed = codeReviewCompletedAt(body, state[section].commit_sha, section);
       const observed = Date.parse(comment.updated_at || comment.created_at || "");
       if (!Number.isFinite(completed) || !Number.isFinite(observed) || completed >= observed + 1000) return null;
@@ -299,6 +300,8 @@ function isSectionClearingState(comment, section, headSha) {
 }
 
 function findingCompletedAt(comment, section, headSha) {
+  const presentation = String(comment.body || "").replace(/\s*<details>\s*<summary>ℹ️ About Codex in GitHub<\/summary>[\s\S]*<\/details>\s*$/, "");
+  if (/\b(?:P[0-2]|failed|failure|do.not.merge)\b/i.test(presentation.replaceAll("**", ""))) return Date.parse(comment.updated_at || comment.created_at || "");
   const completed = codeReviewCompletedAt(String(comment.body || ""), headSha, section);
   const observed = Date.parse(comment.updated_at || comment.created_at || "");
   return Number.isFinite(completed) && completed <= observed + 999 ? completed : observed;
