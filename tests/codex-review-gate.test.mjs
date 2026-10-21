@@ -941,3 +941,15 @@ test("case-variant unfamiliar receipts follow independent machine chronology", (
   assert.equal(runGate([{ ...tied, updated_at: "2026-10-15T23:00:00Z" }, later]).status, 1);
   assert.equal(runGate([{ ...opaque, body: opaque.body + "\nCODEX REVIEW: duplicate" }, later]).status, 1);
 });
+
+
+test("validated reference definitions remain non-rendered while code and invalid text stay visible", () => {
+  for (const suffix of ["\n[doc]:https://example.test/P1", "\n[doc]:\n  https://example.test/P1"]) {
+    const state = summaryComment(stateBody + suffix);
+    assert.equal(runGate([state]).status, 0, suffix);
+  }
+  for (const suffix of ["\n[safe\n\nlabel](P1)", "\n`[doc]:https://example.test/P1`", "\n[doc]:\n\nhttps://example.test/P1"]) {
+    const state = summaryComment(stateBody + suffix);
+    assert.equal(runGate([state]).status, 1, suffix);
+  }
+});

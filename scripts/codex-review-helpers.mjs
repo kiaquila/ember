@@ -116,6 +116,10 @@ function preserveLiteralMarkdownLinks(text) {
   });
 }
 
+function isVisibleLinkLabel(label) {
+  return !/\n[ \t\f\v]*\n/.test(label.replace(/\r\n?/g, "\n"));
+}
+
 function isVisibleLinkDestination(destination, allowEmpty = true) {
   destination = destination.replace(/\r\n?/g, "\n");
   if (/\r?\n[ \t\f\v]*\r?\n/.test(destination)) return false;
@@ -132,7 +136,7 @@ function visibleMarkdownLinkLabels(text) {
   let result = "";
   let consumed = 0;
   for (const match of text.matchAll(/\[((?:\\.|[^\]\\])*)\]\(/g)) {
-    if (match.index < consumed || isEscapedMarkdownStart(text, match.index)) continue;
+    if (match.index < consumed || isEscapedMarkdownStart(text, match.index) || !isVisibleLinkLabel(match[1])) continue;
     let depth = 1;
     let cursor = match.index + match[0].length;
     for (; cursor < text.length && depth; cursor += 1) {
@@ -146,13 +150,18 @@ function visibleMarkdownLinkLabels(text) {
     consumed = cursor;
   }
   const definitions = new Set();
+  const definitionBodies = new Set();
   const definitionPattern = /^ {0,3}\[((?:\\.|[^\]\\])+)\]:[ \t\f\v]*(?:\r?\n[ \t\f\v]*)?([^\r\n]+)(?:\r?\n[ \t\f\v]*((?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\((?:[^()\\]|\\.)*\))))?[ \t\f\v]*$/gm;
   for (const entry of text.matchAll(definitionPattern)) {
     const destination = entry[2] + (entry[3] ? " " + entry[3] : "");
-    if (isVisibleLinkDestination(destination, false)) definitions.add(entry[1].trim().replace(/\s+/g, " ").toLowerCase());
+    if (isVisibleLinkLabel(entry[1]) && isVisibleLinkDestination(destination, false)) {
+      definitions.add(entry[1].trim().replace(/\s+/g, " ").toLowerCase());
+      definitionBodies.add(entry[0]);
+    }
   }
-  const references = (result + text.slice(consumed)).replace(/\[([^\]]*)\]\[([^\]]*)\]/g, (source, label, reference, offset, whole) => !isEscapedMarkdownStart(whole, offset) && definitions.has((reference || label).trim().replace(/\s+/g, " ").toLowerCase()) ? label : source);
-  return references.replace(/\[([^\]]+)\](?![\[(])/g, (source, label, offset, whole) => !isEscapedMarkdownStart(whole, offset) && definitions.has(label.trim().replace(/\s+/g, " ").toLowerCase()) ? label : source);
+  const projected = (result + text.slice(consumed)).replace(definitionPattern, (source) => definitionBodies.has(source) ? "" : source);
+  const references = projected.replace(/\[([^\]]*)\]\[([^\]]*)\]/g, (source, label, reference, offset, whole) => !isEscapedMarkdownStart(whole, offset) && isVisibleLinkLabel(label) && isVisibleLinkLabel(reference) && definitions.has((reference || label).trim().replace(/\s+/g, " ").toLowerCase()) ? label : source);
+  return references.replace(/\[([^\]]+)\](?![\[(])/g, (source, label, offset, whole) => !isEscapedMarkdownStart(whole, offset) && isVisibleLinkLabel(label) && definitions.has(label.trim().replace(/\s+/g, " ").toLowerCase()) ? label : source);
 }
 
 // Normalize only human-visible negative evidence; protocol and clocks stay raw.
