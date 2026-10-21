@@ -280,7 +280,7 @@ function latestCodexCommentResult(comments, headSha, requestedAt, requestComment
   const sections = ["code_review", "security_review"];
   // Historical clean proof only resolves historical findings; it cannot grant
   // current-request approval, which still uses candidates above.
-  const cleanSummaries = signals.filter((comment) => isAffirmativeCodexReviewState(comment, headSha, "1970-01-01T00:00:00Z", 0));
+  const cleanSummaries = signals.filter((comment) => typedCodexReviewState(comment));
   const lastAffirmativeTime = (section) => Math.max(...cleanSummaries.filter((comment) => {
     const value = typedCodexReviewState(comment)?.[section];
     return value?.commit_sha === headSha && value.status === "completed" &&

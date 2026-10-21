@@ -745,6 +745,18 @@ test("same-head repeated requests retain typed findings until matching newer mac
       assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pass", "a repeated request does not resurrect a finding already cleared before it");
       assert.equal(runGate([repeated, ...comments], reviews).status, 0);
       comments.pop();
+      for (const status of [null, "running"]) {
+        const encoded = priorClean.body.match(/codex-review-state:v1 (\{[^\r\n]*\}) -->/)[1];
+        const state = JSON.parse(encoded);
+        const other = section === "code_review" ? "security_review" : "code_review";
+        state[other] = { commit_sha: status ? state[other].commit_sha : null, has_any_findings: null, has_unresolved_findings: null, status };
+        const label = other === "code_review" ? "Code Review" : "Security Review";
+        const partial = { ...priorClean, body: priorClean.body.replace(encoded, JSON.stringify(state)).split("\n").filter((line) => !line.includes("**" + label + "**")).join("\n") };
+        comments.push(partial);
+        assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pass", "valid section-specific clearing survives a repeated request");
+        assert.equal(runGate([repeated, ...comments], reviews).status, 0);
+        comments.pop();
+      }
       comments.push({ ...summaryComment(stateBody.replaceAll(answeredAt, "2026-10-15T23:30:00Z")), updated_at: "2026-10-15T23:30:00Z" });
       assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), section === "security_review" ? "pending" : "pass", "null security is not security completion");
       if (section === "security_review") {

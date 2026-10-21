@@ -64,7 +64,7 @@ renew approval or outrank a later pending verdict. Unknown or negative receipt
 edits retain their update time so they can invalidate an older clean completion.
 
 A trusted exact-head clean formal review can also supersede strictly older
-pending summary evidence. Valid exact-head structured findings survive a repeated request for that head. Earlier valid section-specific clearing proof also remains effective, so repeated requests do not resurrect resolved findings; historical proof alone cannot grant the new request approval.
+pending summary evidence. Valid exact-head structured findings survive a repeated request for that head. Earlier valid section-specific clearing proof also remains effective when another section is absent or running, so repeated requests do not resurrect resolved findings; historical proof alone cannot grant the new request approval.
 Code findings require newer affirmative code proof; security findings require
 newer completed false/false security proof for that head (null is insufficient).
 Typed finding order uses the affected section’s canonical completion time; unrelated summary edits do not renew that finding. Malformed and foreign-head historical state cannot become permanent vetoes.
