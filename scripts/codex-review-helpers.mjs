@@ -110,13 +110,15 @@ function preserveLiteralMarkdownLinks(text) {
       return line;
     }).join("\n");
     const indentation = context.slice(context.lastIndexOf("\n") + 1).match(/^[ \t]*/)[0];
-    return spans.some(([start, end]) => index >= start && index < end) ||
+    return (bracket === "[" && isRawHtmlRowContext(text, index, true)) ||
+      spans.some(([start, end]) => index >= start && index < end) ||
       indentation.includes("\t") || indentation.length >= 4 ||
       isProtocolCodeExample(context, context.length) ? ({ "[": "&#91;", "<": "&#60;", "&": "&#38;" })[bracket] : bracket;
   });
 }
 
-function isVisibleLinkLabel(label) {
+function isVisibleLinkLabel(label, reference = false) {
+  if (reference && ([...label].length > 999 || !/[^ \t\r\n\f\v]/.test(label) || /[\[\]]/.test(label.replace(/\\[!-/:-@[-`{-~]/g, "")))) return false;
   return !/\n[ \t\f\v]*\n/.test(label.replace(/\r\n?/g, "\n"));
 }
 
@@ -128,6 +130,14 @@ function isVisibleLinkDestination(destination, allowEmpty = true) {
   const bare = target.replace(/\\[!-/:-@[-`{-~]/g, "");
   const titled = target.match(/^(<[^<>\r\n]*>|[^ \t\r\n\f\v]+)[ \t\r\n\f\v]+(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\((?:[^()\\]|\\.)*\))[ \t\r\n\f\v]*$/);
   const linkTarget = titled ? titled[1] : target;
+  if (!linkTarget.startsWith("<")) {
+    let depth = 0;
+    for (const character of linkTarget.replace(/\\[!-/:-@[-`{-~]/g, "")) {
+      if (character === "(") depth += 1;
+      else if (character === ")" && --depth < 0) return false;
+    }
+    if (depth !== 0) return false;
+  }
   return !(/[ \t\r\n\f\v]/.test(bare) && !titled) && !(/[<>]/.test(linkTarget) && !/^<[^<>\r\n]*>$/.test(linkTarget));
 }
 
@@ -154,14 +164,14 @@ function visibleMarkdownLinkLabels(text) {
   const definitionPattern = /^ {0,3}\[((?:\\.|[^\]\\])+)\]:[ \t\f\v]*(?:\r?\n[ \t\f\v]*)?([^\r\n]+)(?:\r?\n[ \t\f\v]*((?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\((?:[^()\\]|\\.)*\))))?[ \t\f\v]*$/gm;
   for (const entry of text.matchAll(definitionPattern)) {
     const destination = entry[2] + (entry[3] ? " " + entry[3] : "");
-    if (isVisibleLinkLabel(entry[1]) && isVisibleLinkDestination(destination, false)) {
+    if (isVisibleLinkLabel(entry[1], true) && isVisibleLinkDestination(destination, false)) {
       definitions.add(entry[1].trim().replace(/\s+/g, " ").toLowerCase());
       definitionBodies.add(entry[0]);
     }
   }
   const projected = (result + text.slice(consumed)).replace(definitionPattern, (source) => definitionBodies.has(source) ? "" : source);
-  const references = projected.replace(/\[([^\]]*)\]\[([^\]]*)\]/g, (source, label, reference, offset, whole) => !isEscapedMarkdownStart(whole, offset) && isVisibleLinkLabel(label) && isVisibleLinkLabel(reference) && definitions.has((reference || label).trim().replace(/\s+/g, " ").toLowerCase()) ? label : source);
-  return references.replace(/\[([^\]]+)\](?![\[(])/g, (source, label, offset, whole) => !isEscapedMarkdownStart(whole, offset) && isVisibleLinkLabel(label) && definitions.has(label.trim().replace(/\s+/g, " ").toLowerCase()) ? label : source);
+  const references = projected.replace(/\[([^\]]*)\]\[([^\]]*)\]/g, (source, label, reference, offset, whole) => !isEscapedMarkdownStart(whole, offset) && isVisibleLinkLabel(label) && isVisibleLinkLabel(reference || label, true) && definitions.has((reference || label).trim().replace(/\s+/g, " ").toLowerCase()) ? label : source);
+  return references.replace(/\[([^\]]+)\](?![\[(])/g, (source, label, offset, whole) => !isEscapedMarkdownStart(whole, offset) && isVisibleLinkLabel(label, true) && definitions.has(label.trim().replace(/\s+/g, " ").toLowerCase()) ? label : source);
 }
 
 // Normalize only human-visible negative evidence; protocol and clocks stay raw.
@@ -169,7 +179,10 @@ function visibleCodexReviewText(value) {
   // Parse raw structural delimiters before decoding text entities: an encoded
   // quote is attribute data, and an encoded angle bracket cannot create a tag.
   const raw = String(value || "").replace(/<!--[\s\S]*?(?:-->|$)/g, (comment) => comment.replace(/[^\r\n]/g, ""));
-  const images = preserveLiteralMarkdownLinks(raw).replace(/<img\b((?:[^"'<>]|"[^"]*"|'[^']*')*)>/gi, (tag, attributes) => {
+  const literalSafe = preserveLiteralMarkdownLinks(raw);
+  const htmlReferences = literalSafe.replace(/&#(?:x[0-9a-f]+|[0-9]+);?/gi, (entity, index) =>
+    entity.endsWith(";") || !isRawHtmlRowContext(literalSafe, index, true) ? entity : entity + ";");
+  const images = htmlReferences.replace(/<img\b((?:[^"'<>]|"[^"]*"|'[^']*')*)>/gi, (tag, attributes) => {
     const alt = attributes.match(/(?:^|\s)alt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/i);
     return alt ? " " + alt.slice(1).find((value) => value !== undefined) + " " : " ";
   });
@@ -184,7 +197,8 @@ function visibleCodexReviewText(value) {
 }
 
 function hasContradictoryCodexPresentation(body) {
-  return /\b(?:found|unresolved|issues?|findings?|failed|failure|running|pending|cancelled|incomplete|in.progress|not.completed|changes.requested|security.concerns?|do.not.merge|P[0-2])\b/i.test(visibleCodexReviewText(body));
+  const visible = visibleCodexReviewText(body).replace(/\bfound\s+(?:no|0)\s+issues?\b/gi, "");
+  return /\b(?:found|unresolved|issues?|findings?|failed|failure|running|pending|cancelled|incomplete|in.progress|not.completed|changes.requested|security.concerns?|do.not.merge|P[0-2])\b/i.test(visible);
 }
 
 function hasRenderedCodexSectionRow(body, label) {
@@ -266,7 +280,7 @@ export function isCodexReviewWakeupComment(body) {
 }
 
 // GFM raw HTML blocks cannot supply a live Markdown status-table row.
-function isRawHtmlRowContext(body, index) {
+function isRawHtmlRowContext(body, index, markdownOnly = false) {
   const prefix = body.slice(0, index).replace(/<!--[\s\S]*?(?:-->|$)/g, (comment) => comment.replace(/[^\r\n]/g, ""));
   const blockTags = new Set("address article aside base basefont blockquote body caption center col colgroup dd details dialog dir div dl dt fieldset figcaption figure footer form frame frameset h1 h2 h3 h4 h5 h6 head header hr html iframe legend li link main menu menuitem nav noframes ol optgroup option p param search section summary table tbody td tfoot th thead title tr track ul".split(" "));
   const voidTags = new Set("area base basefont br col embed frame hr img input link meta param source track wbr".split(" "));
@@ -302,7 +316,7 @@ function isRawHtmlRowContext(body, index) {
       }
     }
   }
-  return Boolean(until || untilBlank || containers.length);
+  return Boolean(until || untilBlank || (!markdownOnly && containers.length));
 }
 
 function codeReviewCompletedAt(body, headSha, section = "code_review") {
@@ -361,7 +375,7 @@ export function isAffirmativeCodexReviewState(comment, headSha, requestedAt, req
       /Codex Review:|\*\*Reviewed commit:/i.test(body) || containsBlockingCodexSeverity(body) || hasContradictoryCodexPresentation(body)) return false;
   const presentation = body.slice(match[0].length).replace(/\s*<details>\s*<summary>ℹ️ About Codex in GitHub<\/summary>[\s\S]*<\/details>\s*$/, "");
   if (!/^(?:[ \t]*\r?\n)* {0,3}## Codex Review Summary\b/.test(presentation) ||
-      /<details>|<summary>|\b(?:found|unresolved|issues?|findings?|failed|failure|running|pending|cancelled|incomplete|in.progress|not.completed|changes.requested|security.concerns?|do.not.merge|P[0-2])\b/i.test(visibleCodexReviewText(presentation))) return false;
+      (/<details>|<summary>/i.test(visibleCodexReviewText(presentation)) || hasContradictoryCodexPresentation(presentation))) return false;
   if ([...presentation.matchAll(/\b[a-f0-9]{7,40}\b/gi)].some(([sha]) => !headSha.startsWith(sha))) return false;
   const observed = Date.parse(comment.updated_at || comment.created_at || "");
   const requested = Date.parse(requestedAt || "");
