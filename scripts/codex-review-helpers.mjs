@@ -83,6 +83,17 @@ function isEscapedMarkdownStart(text, index) {
 
 // Code contexts display link syntax literally; protect their opening bracket
 // until visible entities are decoded, after all Markdown transformations.
+function stripMarkdownContainers(text) {
+  return text.split("\n").map((line) => {
+      let previous;
+      do {
+        previous = line;
+        line = line.replace(/^ {0,3}>[ \t]?/, "").replace(/^ {0,3}(?:[-+*]|[0-9]{1,9}[.)])[ \t]/, "");
+      } while (line !== previous);
+      return line;
+  }).join("\n");
+}
+
 function preserveLiteralMarkdownLinks(text) {
   const spans = [];
   let consumed = 0;
@@ -101,14 +112,7 @@ function preserveLiteralMarkdownLinks(text) {
     spans.push([tag.index + tag[0].length, close === -1 ? text.length : tag.index + tag[0].length + close]);
   }
   return text.replace(/[&<\[]/g, (bracket, index) => {
-    const context = text.slice(0, index).split("\n").map((line) => {
-      let previous;
-      do {
-        previous = line;
-        line = line.replace(/^ {0,3}>[ \t]?/, "").replace(/^ {0,3}(?:[-+*]|[0-9]{1,9}[.)])[ \t]/, "");
-      } while (line !== previous);
-      return line;
-    }).join("\n");
+    const context = stripMarkdownContainers(text.slice(0, index));
     const indentation = context.slice(context.lastIndexOf("\n") + 1).match(/^[ \t]*/)[0];
     return (bracket === "[" && isRawHtmlRowContext(text, index, true)) ||
       spans.some(([start, end]) => index >= start && index < end) ||
@@ -133,7 +137,7 @@ function isVisibleLinkDestination(destination, allowEmpty = true) {
   if (!linkTarget.startsWith("<")) {
     let depth = 0;
     for (const character of linkTarget.replace(/\\[!-/:-@[-`{-~]/g, "")) {
-      if (character === "(") depth += 1;
+      if (character === "(" && ++depth > 32) return false;
       else if (character === ")" && --depth < 0) return false;
     }
     if (depth !== 0) return false;
@@ -164,6 +168,7 @@ function visibleMarkdownLinkLabels(text) {
   const definitionPattern = /^ {0,3}\[((?:\\.|[^\]\\])+)\]:[ \t\f\v]*(?:\r?\n[ \t\f\v]*)?([^\r\n]+)(?:\r?\n[ \t\f\v]*((?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\((?:[^()\\]|\\.)*\))))?[ \t\f\v]*$/gm;
   for (const entry of text.matchAll(definitionPattern)) {
     const destination = entry[2] + (entry[3] ? " " + entry[3] : "");
+    if (entry[1].startsWith("^") && (text.slice(0, entry.index) + text.slice(entry.index + entry[0].length)).includes("[" + entry[1] + "]")) continue;
     if (isVisibleLinkLabel(entry[1], true) && isVisibleLinkDestination(destination, false)) {
       definitions.add(entry[1].trim().replace(/\s+/g, " ").toLowerCase());
       definitionBodies.add(entry[0]);
@@ -191,7 +196,7 @@ function visibleCodexReviewText(value) {
     return point > 0 && point <= 0x10ffff && !(point >= 0xd800 && point <= 0xdfff) ? String.fromCodePoint(point) : entity;
   }).replace(/&([A-Za-z][A-Za-z0-9]*);/g, (entity, name) => Object.hasOwn(HTML_SPACING_ENTITIES, name) ? HTML_SPACING_ENTITIES[name] : entity);
   return ["", " "].flatMap((separator) => {
-    const visible = decode(visibleMarkdownLinkLabels(images.replace(/<\/?[A-Za-z][A-Za-z0-9-]*(?:[ \t\r\n]+[A-Za-z_:][A-Za-z0-9_.:-]*(?:[ \t\r\n]*=[ \t\r\n]*(?:"[^"]*"|'[^']*'|[^ \t\r\n"'=<>`]+))?)*[ \t\r\n]*\/?>/g, separator))).replace(/[*_~`]/g, "");
+    const visible = decode(visibleMarkdownLinkLabels(images.replace(/<\/?[A-Za-z][A-Za-z0-9-]*(?:[ \t\r\n]+[A-Za-z_:][A-Za-z0-9_.:-]*(?:[ \t\r\n]*=[ \t\r\n]*(?:"[^"]*"|'[^']*'|[^ \t\r\n"'=<>`]+))?)*[ \t\r\n]*\/?>/g, (tag, offset) => tag.startsWith("</") && !/^<\/[A-Za-z][A-Za-z0-9-]*[ \t\r\n]*>$/.test(tag) && !isRawHtmlRowContext(images, offset, true) ? tag : separator))).replace(/[*_~`]/g, "");
     return [visible.replace(/\p{Default_Ignorable_Code_Point}/gu, ""), visible.replace(/\p{Default_Ignorable_Code_Point}/gu, " ")];
   }).join(" ").replace(/\s+/g, " ");
 }
@@ -281,7 +286,8 @@ export function isCodexReviewWakeupComment(body) {
 
 // GFM raw HTML blocks cannot supply a live Markdown status-table row.
 function isRawHtmlRowContext(body, index, markdownOnly = false) {
-  const prefix = body.slice(0, index).replace(/<!--[\s\S]*?(?:-->|$)/g, (comment) => comment.replace(/[^\r\n]/g, ""));
+  let prefix = body.slice(0, index).replace(/<!--[\s\S]*?(?:-->|$)/g, (comment) => comment.replace(/[^\r\n]/g, ""));
+  if (markdownOnly) prefix = stripMarkdownContainers(prefix);
   const blockTags = new Set("address article aside base basefont blockquote body caption center col colgroup dd details dialog dir div dl dt fieldset figcaption figure footer form frame frameset h1 h2 h3 h4 h5 h6 head header hr html iframe legend li link main menu menuitem nav noframes ol optgroup option p param search section summary table tbody td tfoot th thead title tr track ul".split(" "));
   const voidTags = new Set("area base basefont br col embed frame hr img input link meta param source track wbr".split(" "));
   const containers = [];
@@ -302,7 +308,7 @@ function isRawHtmlRowContext(body, index, markdownOnly = false) {
     if (/^ {0,3}<\?/.test(line)) { if (!line.includes("?>")) until = /\?>/; continue; }
     if (/^ {0,3}<!\[CDATA\[/.test(line)) { if (!line.includes("]]>")) until = /\]\]>/; continue; }
     if (/^ {0,3}<![A-Z]/.test(line)) { if (!line.includes(">")) until = />/; continue; }
-    if (!line.trim()) untilBlank = false;
+    if (!line.trim() && !(markdownOnly && !prefix.endsWith("\n") && offset > prefix.length)) untilBlank = false;
     const start = line.match(/^ {0,3}<\/?([a-z][a-z0-9-]*)(?=[\s/>])/i);
     const completeTag = /^ {0,3}<\/?[a-z][a-z0-9-]*(?:[^"'<>]|"[^"]*"|'[^']*')*>[ \t]*$/i.test(line);
     if (start && (blockTags.has(start[1].toLowerCase()) || completeTag)) untilBlank = true;
