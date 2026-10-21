@@ -226,18 +226,21 @@ export function isAffirmativeCodexReviewState(comment, headSha, requestedAt, req
 
 // Historical findings must be well-formed typed state for this exact head;
 // stale malformed/foreign-head summaries are not persistent vetoes.
-function typedCodexReviewState(comment) {
+function typedCodexReviewState(comment, { negativeOnly = false } = {}) {
   const rawBody = String(comment.body || "");
   if (hasCodeProtocolEnvelope(rawBody)) return null;
   const body = rawBody.replace(/<!--([\s\S]*?)-->/g, (marker, content, index) =>
     /^codex[-:]/i.test(content.trim()) && isProtocolCodeExample(rawBody, index) ? "" : marker).trim();
   const envelope = body.replace(/<!--([\s\S]*?)-->/g, (marker, content) => /^codex[-:]/i.test(content.trim()) ? marker : "").trim();
   const match = envelope.match(/^<!-- codex-pull-request-review-summary -->\s*<!-- codex-review-state:v1 (\{[\s\S]*?\}) -->\s*## Codex Review Summary\b/);
-  const protocol = [...body.matchAll(/<!--([\s\S]*?)-->/g)].filter((entry) => /^codex[-:]/i.test(entry[1].trim()));
+  // Trailing presentation cannot erase proven negative facts. Clearing keeps
+  // the default whole-body protocol validation and original-body approval checks.
+  const protocolBody = negativeOnly && match ? match[0] : body;
+  const protocol = [...protocolBody.matchAll(/<!--([\s\S]*?)-->/g)].filter((entry) => /^codex[-:]/i.test(entry[1].trim()));
   if (!match || protocol.length !== 2 ||
-      (body.match(/<!-- codex-pull-request-review-summary -->/g) || []).length !== 1 ||
+      (protocolBody.match(/<!-- codex-pull-request-review-summary -->/g) || []).length !== 1 ||
       !/^## Codex Review Summary\b/m.test(body) ||
-      /Codex Review:|\*\*Reviewed commit:/.test(body)) return null;
+      /Codex Review:|\*\*Reviewed commit:/.test(protocolBody)) return null;
   try {
     const state = JSON.parse(match[1]);
     const names = [...match[1].matchAll(/("(?:\\.|[^"\\])*")\s*:/g)].map((entry) => JSON.parse(entry[1]));
@@ -309,7 +312,7 @@ function latestCodexCommentResult(comments, headSha, requestedAt, requestComment
     (Date.parse(a.updated_at || a.created_at || "") || 0) || compareNumericIds(b.id, a.id));
   const receiptObservedAt = (comment) => Date.parse(isAcceptableCodexSummaryComment(comment, headSha)
     ? comment.created_at || "" : comment.updated_at || comment.created_at || "");
-  const receipts = signals.filter((comment) => /Codex Review:|codex-review-receipt:/.test(String(comment.body || "")) &&
+  const receipts = signals.filter((comment) => /Codex Review:|codex-review-receipt:/i.test(String(comment.body || "")) &&
     (isAcceptableCodexSummaryComment(comment, headSha)
       ? isAcceptableCodexSummaryComment(comment, headSha, requestedAt, requestCommentId)
       : receiptObservedAt(comment) >= Date.parse(requestedAt || "")));
@@ -327,7 +330,7 @@ function latestCodexCommentResult(comments, headSha, requestedAt, requestComment
   if (receipts.some((comment) => !isAcceptableCodexSummaryComment(comment, headSha, requestedAt, requestCommentId) && !isReceiptCandidate(comment))) return "pending";
   const candidates = [...summaries, ...receipts];
   const observed = (comment) => {
-    const state = typedCodexReviewState(comment);
+    const state = typedCodexReviewState(comment, { negativeOnly: true });
     const findings = ["code_review", "security_review"].filter((section) => state?.[section]?.commit_sha === headSha &&
       (state[section].has_any_findings === true || state[section].has_unresolved_findings === true));
     if (findings.length && ![state.code_review, state.security_review].some((value) => value.status === "running")) return Math.max(...findings.map((section) => findingCompletedAt(comment, section, headSha)));
@@ -359,13 +362,13 @@ function latestCodexCommentResult(comments, headSha, requestedAt, requestComment
     return Number.isFinite(completed) && completed <= observed + 999 ? Math.floor(completed / 1000) : -Infinity;
   }));
   const historical = signals.filter((comment) => {
-    const state = typedCodexReviewState(comment);
+    const state = typedCodexReviewState(comment, { negativeOnly: true });
     return sections.some((section) => state?.[section]?.commit_sha === headSha &&
       (state[section].has_any_findings === true || state[section].has_unresolved_findings === true));
   });
   const findingSignals = [...new Set([...summaries, ...historical])];
   const unclearedFindings = findingSignals.some((comment) => {
-    const state = typedCodexReviewState(comment);
+    const state = typedCodexReviewState(comment, { negativeOnly: true });
     const observedBucket = Math.floor(Date.parse(comment.updated_at || comment.created_at || "") / 1000);
     if (state) return sections.some((section) => state[section].commit_sha === headSha &&
       (state[section].has_any_findings === true || state[section].has_unresolved_findings === true) &&
