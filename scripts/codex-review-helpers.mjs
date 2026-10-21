@@ -80,7 +80,7 @@ function visibleCodexReviewText(value) {
   return String(value || "").replace(/&#(x[0-9a-f]+|[0-9]+);/gi, (entity, digits) => {
     const point = digits[0].toLowerCase() === "x" ? parseInt(digits.slice(1), 16) : parseInt(digits, 10);
     return point > 0 && point <= 0x10ffff && !(point >= 0xd800 && point <= 0xdfff) ? String.fromCodePoint(point) : entity;
-  }).replace(/&nbsp;/gi, " ").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[*_~`]/g, "");
+  }).replace(/&(?:Tab|NewLine|nbsp|NonBreakingSpace|ensp|emsp|emsp13|emsp14|numsp|puncsp|thinsp|ThinSpace|hairsp|VeryThinSpace|MediumSpace|ThickSpace);/g, " ").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[*_~`]/g, "").replace(/\s+/g, " ");
 }
 
 export function containsBlockingCodexSeverity(body) {
@@ -331,9 +331,9 @@ function latestCodexCommentResult(comments, headSha, requestedAt, requestComment
       : receiptObservedAt(comment) >= Date.parse(requestedAt || "")));
   const isReceiptCandidate = (comment) => {
     const body = String(comment.body || "");
-    const match = body.match(/(Codex Review: Didn't find any major issues\.)([^\r\n]*)/);
+    const match = body.match(/(Codex Review: Didn't find any major issues\.)([^\r\n]*)/i);
     if (!match || (match[2] && !match[2].startsWith(" ")) || match[2].length > 121 ||
-        (body.match(/Codex Review:/g) || []).length !== 1 || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}<>{}\[\]`*=\\/|]/u.test(match[2]) ||
+        (body.match(/Codex Review:/gi) || []).length !== 1 || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}<>{}\[\]`*=\\/|]/u.test(match[2]) ||
         /\b[a-f0-9]{7,40}\b/i.test(match[2]) || containsBlockingCodexSeverity(body)) return false;
     return isAcceptableCodexSummaryComment({ ...comment, body: body.replace(match[0], match[1]) }, headSha);
   };
