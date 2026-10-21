@@ -747,6 +747,14 @@ test("same-head repeated requests retain typed findings until matching newer mac
         assert.equal(runGate([repeated, ...comments], reviews).status, 1);
         comments.pop();
       }
+      {
+        const ownLabel = section === "code_review" ? "Code Review" : "Security Review";
+        const mismatched = priorClean.body.split("\n").map((line) => line.includes("**" + ownLabel + "**") ? line.replace(/`[a-f0-9]{7,40}`/, "`fffffff`") : line).join("\n");
+        comments.push({ ...priorClean, body: mismatched });
+        assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pending", "own-section row SHA must match typed current head");
+        assert.equal(runGate([repeated, ...comments], reviews).status, 1);
+        comments.pop();
+      }
       comments.push(priorClean);
       assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pass", "a repeated request does not resurrect a finding already cleared before it");
       assert.equal(runGate([repeated, ...comments], reviews).status, 0);
