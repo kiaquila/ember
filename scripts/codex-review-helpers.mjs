@@ -83,14 +83,19 @@ function isEscapedMarkdownStart(text, index) {
 
 // Code contexts display link syntax literally; protect their opening bracket
 // until visible entities are decoded, after all Markdown transformations.
-function stripMarkdownContainers(text) {
+function stripMarkdownContainers(text, preserveBoundaries = false) {
+  let previousQuotes = 0;
   return text.split("\n").map((line) => {
       let previous;
+      let quotes = 0;
       do {
         previous = line;
+        if (/^ {0,3}>/.test(line)) quotes += 1;
         line = line.replace(/^ {0,3}>[ \t]?/, "").replace(/^ {0,3}(?:[-+*]|[0-9]{1,9}[.)])[ \t]/, "");
       } while (line !== previous);
-      return line;
+      const boundary = preserveBoundaries && quotes < previousQuotes ? "\n" : "";
+      previousQuotes = quotes;
+      return boundary + line;
   }).join("\n");
 }
 
@@ -145,8 +150,31 @@ function isVisibleLinkDestination(destination, allowEmpty = true) {
   return !(/[ \t\r\n\f\v]/.test(bare) && !titled) && !(/[<>]/.test(linkTarget) && !/^<[^<>\r\n]*>$/.test(linkTarget));
 }
 
-function visibleMarkdownLinkLabels(text) {
+function visibleFootnoteBodies(text) {
+  const key = (label) => label.toLowerCase();
+  const definitions = [...text.matchAll(/^ {0,3}\[\^([^\[\]\x00-\x20]+)\]:[^\n]*(?:\n(?: {2,}|\t)[^\n]*)*/gm)];
+  const references = (content) => {
+    const visible = visibleMarkdownLinkLabels(content, false);
+    return [...visible.matchAll(/\[\^([^\[\]\x00-\x20]+)\]/g)]
+      .filter((match) => !isEscapedMarkdownStart(visible, match.index)).map((match) => key(match[1]));
+  };
+  let usage = text;
+  for (const definition of [...definitions].reverse()) usage = usage.slice(0, definition.index) + "\n" + usage.slice(definition.index + definition[0].length);
+  const used = new Set(references(usage));
+  for (const label of used) {
+    const definition = definitions.find((entry) => key(entry[1]) === label);
+    if (definition) for (const reference of references(definition[0].replace(/^ {0,3}\[\^[^\]\n]+\]:/, ""))) used.add(reference);
+  }
+  for (const definition of [...definitions].reverse()) {
+    const replacement = used.has(key(definition[1])) ? definition[0].replace(/^ {0,3}\[\^[^\]\n]+\]:/, "") : definition[0].replace(/[^\n]/g, "");
+    text = text.slice(0, definition.index) + replacement + text.slice(definition.index + definition[0].length);
+  }
+  return text;
+}
+
+function visibleMarkdownLinkLabels(text, projectFootnotes = true) {
   text = text.replace(/\r\n?/g, "\n");
+  if (projectFootnotes) text = visibleFootnoteBodies(text);
   let result = "";
   let consumed = 0;
   for (const match of text.matchAll(/\[((?:\\.|[^\]\\])*)\]\(/g)) {
@@ -168,7 +196,6 @@ function visibleMarkdownLinkLabels(text) {
   const definitionPattern = /^ {0,3}\[((?:\\.|[^\]\\])+)\]:[ \t\f\v]*(?:\r?\n[ \t\f\v]*)?([^\r\n]+)(?:\r?\n[ \t\f\v]*((?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\((?:[^()\\]|\\.)*\))))?[ \t\f\v]*$/gm;
   for (const entry of text.matchAll(definitionPattern)) {
     const destination = entry[2] + (entry[3] ? " " + entry[3] : "");
-    if (entry[1].startsWith("^") && (text.slice(0, entry.index) + text.slice(entry.index + entry[0].length)).includes("[" + entry[1] + "]")) continue;
     if (isVisibleLinkLabel(entry[1], true) && isVisibleLinkDestination(destination, false)) {
       definitions.add(entry[1].trim().replace(/\s+/g, " ").toLowerCase());
       definitionBodies.add(entry[0]);
@@ -187,7 +214,9 @@ function visibleCodexReviewText(value) {
   const literalSafe = preserveLiteralMarkdownLinks(raw);
   const htmlReferences = literalSafe.replace(/&#(?:x[0-9a-f]+|[0-9]+);?/gi, (entity, index) =>
     entity.endsWith(";") || !isRawHtmlRowContext(literalSafe, index, true) ? entity : entity + ";");
-  const images = htmlReferences.replace(/<img\b((?:[^"'<>]|"[^"]*"|'[^']*')*)>/gi, (tag, attributes) => {
+  const validTag = /^<[A-Za-z][A-Za-z0-9-]*(?:[ \t\r\n]+[A-Za-z_:][A-Za-z0-9_.:-]*(?:[ \t\r\n]*=[ \t\r\n]*(?:"[^"]*"|'[^']*'|[^ \t\r\n"'=<>`]+))?)*[ \t\r\n]*\/?>$|^<\/[A-Za-z][A-Za-z0-9-]*[ \t\r\n]*>$/;
+  const images = htmlReferences.replace(/<img\b((?:[^"'<>]|"[^"]*"|'[^']*')*)>/gi, (tag, attributes, offset) => {
+    if (!validTag.test(tag) && !isRawHtmlRowContext(htmlReferences, offset, true)) return tag;
     const alt = attributes.match(/(?:^|\s)alt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/i);
     return alt ? " " + alt.slice(1).find((value) => value !== undefined) + " " : " ";
   });
@@ -196,7 +225,7 @@ function visibleCodexReviewText(value) {
     return point > 0 && point <= 0x10ffff && !(point >= 0xd800 && point <= 0xdfff) ? String.fromCodePoint(point) : entity;
   }).replace(/&([A-Za-z][A-Za-z0-9]*);/g, (entity, name) => Object.hasOwn(HTML_SPACING_ENTITIES, name) ? HTML_SPACING_ENTITIES[name] : entity);
   return ["", " "].flatMap((separator) => {
-    const visible = decode(visibleMarkdownLinkLabels(images.replace(/<\/?[A-Za-z][A-Za-z0-9-]*(?:[ \t\r\n]+[A-Za-z_:][A-Za-z0-9_.:-]*(?:[ \t\r\n]*=[ \t\r\n]*(?:"[^"]*"|'[^']*'|[^ \t\r\n"'=<>`]+))?)*[ \t\r\n]*\/?>/g, (tag, offset) => tag.startsWith("</") && !/^<\/[A-Za-z][A-Za-z0-9-]*[ \t\r\n]*>$/.test(tag) && !isRawHtmlRowContext(images, offset, true) ? tag : separator))).replace(/[*_~`]/g, "");
+    const visible = decode(visibleMarkdownLinkLabels(images.replace(/<\/?[A-Za-z][A-Za-z0-9-]*(?:[^"'<>]|"[^"]*"|'[^']*')*>/g, (tag, offset) => validTag.test(tag) || isRawHtmlRowContext(images, offset, true) ? separator : tag))).replace(/[*_~`]/g, "");
     return [visible.replace(/\p{Default_Ignorable_Code_Point}/gu, ""), visible.replace(/\p{Default_Ignorable_Code_Point}/gu, " ")];
   }).join(" ").replace(/\s+/g, " ");
 }
@@ -287,7 +316,7 @@ export function isCodexReviewWakeupComment(body) {
 // GFM raw HTML blocks cannot supply a live Markdown status-table row.
 function isRawHtmlRowContext(body, index, markdownOnly = false) {
   let prefix = body.slice(0, index).replace(/<!--[\s\S]*?(?:-->|$)/g, (comment) => comment.replace(/[^\r\n]/g, ""));
-  if (markdownOnly) prefix = stripMarkdownContainers(prefix);
+  if (markdownOnly) prefix = stripMarkdownContainers(prefix, true);
   const blockTags = new Set("address article aside base basefont blockquote body caption center col colgroup dd details dialog dir div dl dt fieldset figcaption figure footer form frame frameset h1 h2 h3 h4 h5 h6 head header hr html iframe legend li link main menu menuitem nav noframes ol optgroup option p param search section summary table tbody td tfoot th thead title tr track ul".split(" "));
   const voidTags = new Set("area base basefont br col embed frame hr img input link meta param source track wbr".split(" "));
   const containers = [];

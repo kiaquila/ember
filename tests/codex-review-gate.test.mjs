@@ -944,11 +944,11 @@ test("case-variant unfamiliar receipts follow independent machine chronology", (
 
 
 test("validated reference definitions remain non-rendered while code and invalid text stay visible", () => {
-  for (const suffix of ["\n\n[^doc]: P1", "\n<div>\n</span P1>\n</div>", "\n\n<span>P&#49</span> blocker", "\n\n`P&#49 blocker`", "\nFound <em>no</em> issues.", "\nFound `0` issues.", "\n\n[doc]:https://example.test/P1", "\n\n[doc]:\n  https://example.test/P1"]) {
+  for (const suffix of ["\n\n[safe](https://example.test/[^note])\n\n[^note]: P1 example", "\n\n<span title=\"[^note]\">safe</span>\n\n[^note]: P1 example", "\n\nnote[^bad label]\n\n[^bad label]: P1", "\n\n[^doc]: safe\n  P1", "\n\n[^doc]: safe\n    P1", "\n\n> <div>\n[safe](P1)", "\n\n- <div>\n\n[safe](P1)", "\n<div>\n<img / P1>\n</div>", "\n\n[^doc]: P1", "\n<div>\n</span P1>\n</div>", "\n\n<span>P&#49</span> blocker", "\n\n`P&#49 blocker`", "\nFound <em>no</em> issues.", "\nFound `0` issues.", "\n\n[doc]:https://example.test/P1", "\n\n[doc]:\n  https://example.test/P1"]) {
     const state = summaryComment(stateBody + suffix);
     assert.equal(runGate([state]).status, 0, suffix);
   }
-  for (const suffix of ["\n\nnote[^doc]\n\n[^doc]: P1", "\n[safe](" + "(".repeat(33) + "P1" + ")".repeat(33) + ")", "\n\n</span P1>", "\nThere is an issue.", "\n> <div>\n> [safe](P1)\n> </div>", "\n- <div>\n  [safe](P1)\n  </div>", "\nFound 0 code issues and 1 security issue.", "\n<div>\nP&#49 blocker\n</div>", "\n<details><summary>ℹ️ About Codex in GitHub</summary>\nP&#49 blocker\n</details>", "\n[doc]: P1)", "\n[foo[bar]:https://example.test/P1", "\n<div>\n[safe](P1)\n</div>", "\n[safe\n\nlabel](P1)", "\n`[doc]:https://example.test/P1`", "\n[doc]:\n\nhttps://example.test/P1"]) {
+  for (const suffix of ["\n\nroot[^a]\n\n[^a]: safe [^b]\n[^b]: P1", "\n\nnote[^doc]\n\n[^doc]: safe\n  P1", "\n\nnote[^doc]\n\n[^doc]: safe\n    P1", "\n\n[^bad label]: P1 blocker", "\n\n<span P1?>safe</span>", "\n\nnote[^DOC]\n\n[^doc]: P1", "\n\n<img / P1>", "\n\n<img =P1>", "\n\nnote[^doc]\n\n[^doc]: P1", "\n[safe](" + "(".repeat(33) + "P1" + ")".repeat(33) + ")", "\n\n</span P1>", "\nThere is an issue.", "\n> <div>\n> [safe](P1)\n> </div>", "\n- <div>\n  [safe](P1)\n  </div>", "\nFound 0 code issues and 1 security issue.", "\n<div>\nP&#49 blocker\n</div>", "\n<details><summary>ℹ️ About Codex in GitHub</summary>\nP&#49 blocker\n</details>", "\n[doc]: P1)", "\n[foo[bar]:https://example.test/P1", "\n<div>\n[safe](P1)\n</div>", "\n[safe\n\nlabel](P1)", "\n`[doc]:https://example.test/P1`", "\n[doc]:\n\nhttps://example.test/P1"]) {
     const state = summaryComment(stateBody + suffix);
     assert.equal(runGate([state]).status, 1, suffix);
   }
