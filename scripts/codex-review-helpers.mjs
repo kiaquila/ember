@@ -161,12 +161,18 @@ function codeReviewCompletedAt(body, headSha, section = "code_review") {
 
 /** Affirmative machine evidence has a closed schema and the full current SHA.
  * Prose, reactions and the visible Completed heading never grant approval. */
+function isIndentedMarker(rawBody, index) {
+  const prefix = rawBody.slice(rawBody.lastIndexOf("\n", index - 1) + 1, index);
+  return /^[ \t]*$/.test(prefix) && (prefix.includes("\t") || prefix.length >= 4);
+}
+
 function hasIndentedProtocolMarkers(rawBody) {
   // Indented Markdown code is not an active protocol envelope. Check before trim.
+  let count = 0;
   for (const marker of rawBody.matchAll(/<!--([\s\S]*?)-->/g)) {
     if (!/^codex[-:]/i.test(marker[1].trim())) continue;
-    const prefix = rawBody.slice(rawBody.lastIndexOf("\n", marker.index - 1) + 1, marker.index);
-    if (/^[ \t]*$/.test(prefix) && (prefix.includes("\t") || prefix.length >= 4)) return true;
+    if (count++ >= 2) break;
+    if (isIndentedMarker(rawBody, marker.index)) return true;
   }
   return false;
 }
@@ -213,7 +219,8 @@ export function isAffirmativeCodexReviewState(comment, headSha, requestedAt, req
 function typedCodexReviewState(comment) {
   const rawBody = String(comment.body || "");
   if (hasIndentedProtocolMarkers(rawBody)) return null;
-  const body = rawBody.trim();
+  const body = rawBody.replace(/<!--([\s\S]*?)-->/g, (marker, content, index) =>
+    /^codex[-:]/i.test(content.trim()) && isIndentedMarker(rawBody, index) ? "" : marker).trim();
   const envelope = body.replace(/<!--([\s\S]*?)-->/g, (marker, content) => /^codex[-:]/i.test(content.trim()) ? marker : "").trim();
   const match = envelope.match(/^<!-- codex-pull-request-review-summary -->\s*<!-- codex-review-state:v1 (\{[\s\S]*?\}) -->\s*## Codex Review Summary\b/);
   const protocol = [...body.matchAll(/<!--([\s\S]*?)-->/g)].filter((entry) => /^codex[-:]/i.test(entry[1].trim()));
@@ -262,6 +269,14 @@ function isSectionClearingState(comment, section, headSha) {
   const severityBody = state[otherSection].status === "completed"
     ? body.split("\n").filter((line) => !line.startsWith(otherPrefix)).join("\n") : body;
   if (/\bP[0-2]\b/i.test(severityBody)) return false;
+  const otherRows = body.split("\n").filter((line) => line.startsWith(otherPrefix));
+  if (otherRows.length && state[otherSection].status !== "completed") {
+    if (state[otherSection].status !== "running") return false;
+    const running = body.replaceAll(" | 🔄 **Running** since <relative-time", " | ✅ **Completed** <relative-time");
+    const started = codeReviewCompletedAt(running, state[otherSection].commit_sha, otherSection);
+    const observed = Date.parse(comment.updated_at || comment.created_at || "");
+    if (!Number.isFinite(started) || !Number.isFinite(observed) || started >= observed + 1000) return false;
+  }
   let normalized = body.replace(encoded, JSON.stringify({ code_review: state[section], security_review: absent }))
     .split("\n").filter((line) => !line.startsWith("| " + (other === "Code Review" ? "📝" : "🛡️") + " **" + other + "** | ")).join("\n");
   if (section === "security_review") normalized = normalized.replaceAll("🛡️ **Security Review**", "📝 **Code Review**");
