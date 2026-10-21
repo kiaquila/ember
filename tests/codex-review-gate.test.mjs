@@ -794,6 +794,11 @@ test("same-head repeated requests retain typed findings until matching newer mac
         assert.equal(runGate([repeated, ...comments], reviews).status, 0);
         comments.pop();
         if (status === "running") {
+          const staleCompletedRow = priorClean.body.split("\n").find((line) => line.includes("**" + label + "**"));
+          comments.push({ ...partial, body: partial.body + "\n" + staleCompletedRow });
+          assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pending", "typed running cannot clear through a stale completed companion row");
+          assert.equal(runGate([repeated, ...comments], reviews).status, 1);
+          comments.pop();
           const runningRow = priorClean.body.split("\n").find((line) => line.includes("**" + label + "**")).replace("✅ **Completed** ", "🔄 **Running** since ");
           comments.push({ ...partial, body: partial.body + "\n" + runningRow });
           assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pass", "a canonical running companion row preserves independent clearing");

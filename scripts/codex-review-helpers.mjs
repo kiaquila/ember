@@ -272,6 +272,7 @@ function isSectionClearingState(comment, section, headSha) {
   const otherRows = body.split("\n").filter((line) => line.startsWith(otherPrefix));
   if (otherRows.length && state[otherSection].status !== "completed") {
     if (state[otherSection].status !== "running") return false;
+    if (otherRows.length !== 1 || !otherRows[0].startsWith(otherPrefix + "🔄 **Running** since <relative-time")) return false;
     const running = body.replaceAll(" | 🔄 **Running** since <relative-time", " | ✅ **Completed** <relative-time");
     const started = codeReviewCompletedAt(running, state[otherSection].commit_sha, otherSection);
     const observed = Date.parse(comment.updated_at || comment.created_at || "");
