@@ -206,7 +206,6 @@ function typedCodexReviewState(comment) {
   const protocol = [...body.matchAll(/<!--([\s\S]*?)-->/g)].filter((entry) => /^codex[-:]/.test(entry[1].trim()));
   if (!match || protocol.length !== 2 ||
       (body.match(/<!-- codex-pull-request-review-summary -->/g) || []).length !== 1 ||
-      (body.match(/codex-review-state:/g) || []).length !== 1 ||
       !/^## Codex Review Summary\b/m.test(body) ||
       /Codex Review:|\*\*Reviewed commit:/.test(body)) return null;
   try {
