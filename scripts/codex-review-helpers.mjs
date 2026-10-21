@@ -164,7 +164,7 @@ function codeReviewCompletedAt(body, headSha, section = "code_review") {
 function hasIndentedProtocolMarkers(rawBody) {
   // Indented Markdown code is not an active protocol envelope. Check before trim.
   for (const marker of rawBody.matchAll(/<!--([\s\S]*?)-->/g)) {
-    if (!/^codex[-:]/.test(marker[1].trim())) continue;
+    if (!/^codex[-:]/i.test(marker[1].trim())) continue;
     const prefix = rawBody.slice(rawBody.lastIndexOf("\n", marker.index - 1) + 1, marker.index);
     if (/^[ \t]*$/.test(prefix) && (prefix.includes("\t") || prefix.length >= 4)) return true;
   }
@@ -214,9 +214,9 @@ function typedCodexReviewState(comment) {
   const rawBody = String(comment.body || "");
   if (hasIndentedProtocolMarkers(rawBody)) return null;
   const body = rawBody.trim();
-  const envelope = body.replace(/<!--([\s\S]*?)-->/g, (marker, content) => /^codex[-:]/.test(content.trim()) ? marker : "").trim();
+  const envelope = body.replace(/<!--([\s\S]*?)-->/g, (marker, content) => /^codex[-:]/i.test(content.trim()) ? marker : "").trim();
   const match = envelope.match(/^<!-- codex-pull-request-review-summary -->\s*<!-- codex-review-state:v1 (\{[\s\S]*?\}) -->\s*## Codex Review Summary\b/);
-  const protocol = [...body.matchAll(/<!--([\s\S]*?)-->/g)].filter((entry) => /^codex[-:]/.test(entry[1].trim()));
+  const protocol = [...body.matchAll(/<!--([\s\S]*?)-->/g)].filter((entry) => /^codex[-:]/i.test(entry[1].trim()));
   if (!match || protocol.length !== 2 ||
       (body.match(/<!-- codex-pull-request-review-summary -->/g) || []).length !== 1 ||
       !/^## Codex Review Summary\b/m.test(body) ||
