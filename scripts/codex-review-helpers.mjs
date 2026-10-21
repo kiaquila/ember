@@ -276,7 +276,7 @@ function findingCompletedAt(comment, section, headSha) {
 
 function latestCodexCommentResult(comments, headSha, requestedAt, requestCommentId, nativeCompletedAt = NaN) {
   const signals = comments.filter((comment) => isTrustedCodexLogin(comment?.user?.login));
-  const summaries = signals.filter((comment) => /codex-pull-request-review-summary|codex-review-state:/.test(String(comment.body || "")) &&
+  const summaries = signals.filter((comment) => /codex-pull-request-review-summary|codex-review-state:/i.test(String(comment.body || "")) &&
     Date.parse(comment.updated_at || comment.created_at || "") >= Date.parse(requestedAt || ""));
   summaries.sort((a, b) => (Date.parse(b.updated_at || b.created_at || "") || 0) -
     (Date.parse(a.updated_at || a.created_at || "") || 0) || compareNumericIds(b.id, a.id));
