@@ -162,6 +162,8 @@ function codeReviewCompletedAt(body, headSha, section = "code_review") {
   const rows = [...body.matchAll(/^\| 📝 \*\*Code Review\*\* \| ✅ \*\*Completed\*\* <relative-time datetime="([^"]+)">([^<]+)<\/relative-time> \| `([a-f0-9]{7,40})` \| [^|\r\n]+ \|$/gm)];
   if (rows.length !== 1 || (body.match(/\*\*Code Review\*\*/g) || []).length !== 1) return NaN;
   if (isProtocolCodeExample(body, rows[0].index)) return NaN;
+  const preceding = body.slice(0, rows[0].index);
+  if (preceding.lastIndexOf("<!--") > preceding.lastIndexOf("-->")) return NaN;
   const [, timestamp, visibleTime, sha] = rows[0];
   if (timestamp !== visibleTime || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z$/.test(timestamp) || !headSha.startsWith(sha)) return NaN;
   const completed = Date.parse(timestamp);

@@ -748,6 +748,11 @@ test("same-head repeated requests retain typed findings until matching newer mac
       assert.equal(runGate([repeated, ...comments], reviews).status, 1);
       const priorClean = { ...summaryComment(withSecurityProof(stateBody).replaceAll(answeredAt, "2026-10-15T21:30:00Z")), updated_at: "2026-10-15T21:30:00Z" };
       assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, comments[0], priorClean] })), "pending", "historical clean proof alone cannot approve a new request");
+      for (const indentation of [" ", "  ", "   "]) {
+        const row = priorClean.body.match(/^\| 🛡️ \*\*Security Review\*\*.*$/m)[0];
+        const duplicate = { ...priorClean, body: priorClean.body + "\n" + indentation + row };
+        assert.equal(runGate([repeated, ...comments, duplicate], reviews).status, 1);
+      }
       for (const contradiction of ["P&#49; blocker", "P*1* blocker", "Do&#32;not&#32;merge", "P1 regression", "Found issues.", "Security Review failed.", "<!-- CODEX-unknown -->", "<!-- CoDeX-unknown -->"]) {
         comments.push({ ...priorClean, body: priorClean.body.replace("## Codex Review Summary", "## Codex Review Summary\n" + contradiction) });
         assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pending", "contradictory historical presentation cannot clear findings");
@@ -834,6 +839,9 @@ test("same-head repeated requests retain typed findings until matching newer mac
       assert.equal(runGate([repeated, ...comments], reviews).status, 0);
       comments[0].updated_at = "2026-10-16T01:00:00Z";
       assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pass", "unrelated summary edits cannot renew an older section finding");
+      const ownRowLabel = section === "code_review" ? "Code Review" : "Security Review";
+      const hidden = { ...comments[0], body: comments[0].body.split("\n").map((line) => line.includes("**" + ownRowLabel + "**") ? "<!--\n" + line + "\n-->" : line).join("\n") };
+      assert.equal(runGate([repeated, hidden, ...comments.slice(1)], reviews).status, 1, "hidden completion row cannot reuse an older negative clock");
       for (const visibleNegative of ["P&#49; blocker", "P*1* blocker", "Do&#32;not&#32;merge", "Found P1 issues.", "Security review failed."]) {
         const edited = { ...comments[0], body: comments[0].body + "\n" + visibleNegative };
         assert.equal(runGate([repeated, edited, ...comments.slice(1)], reviews).status, 1, "new visible negative evidence uses update time");
