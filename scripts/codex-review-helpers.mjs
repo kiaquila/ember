@@ -99,6 +99,61 @@ function stripMarkdownContainers(text, preserveBoundaries = false) {
   }).join("\n");
 }
 
+// CommonMark delimiter runs: flanking, intraword underscores, and rule of three.
+function activeMarkdownEmphasis(text) {
+  const removed = new Set();
+  const runs = [];
+  const whitespace = (value) => !value || /\s/u.test(value);
+  const punctuation = (value) => !!value && /[\p{P}\p{S}]/u.test(value);
+  const escaped = (index) => ((text.slice(0, index).match(/\\+$/)?.[0].length || 0) % 2) === 1;
+  // Matched code-span delimiters disappear; their literal content is protected
+  // by the existing code-context stage before this projection.
+  const ticks = [...text.matchAll(/`+/g)];
+  let consumed = 0;
+  for (let i = 0; i < ticks.length; i += 1) {
+    const start = ticks[i];
+    if (start.index < consumed || escaped(start.index)) continue;
+    const end = ticks.slice(i + 1).find((run) => run[0].length === start[0].length);
+    if (!end) continue;
+    for (let j = 0; j < start[0].length; j += 1) { removed.add(start.index + j); removed.add(end.index + j); }
+    consumed = end.index + end[0].length;
+  }
+  for (const match of text.matchAll(/\*+|_+|~{2,}/g)) {
+    if (escaped(match.index)) continue;
+    const before = [...text.slice(0, match.index)].at(-1) || "";
+    const after = [...text.slice(match.index + match[0].length)][0] || "";
+    const left = !whitespace(after) && (!punctuation(after) || whitespace(before) || punctuation(before));
+    const right = !whitespace(before) && (!punctuation(before) || whitespace(after) || punctuation(after));
+    runs.push({ character: match[0][0], start: match.index, length: match[0].length, usedOpen: 0, usedClose: 0,
+      open: match[0][0] === "_" ? left && (!right || punctuation(before)) : left,
+      close: match[0][0] === "_" ? right && (!left || punctuation(after)) : right });
+  }
+  for (let closeIndex = 0; closeIndex < runs.length; closeIndex += 1) {
+    const closer = runs[closeIndex];
+    if (!closer.close) continue;
+    for (let openIndex = closeIndex - 1; openIndex >= 0 && closer.length - closer.usedClose >= (closer.character === "~" ? 2 : 1); openIndex -= 1) {
+      const opener = runs[openIndex];
+      if (!opener.open || opener.character !== closer.character || /\r?\n[ \t\f\v]*\r?\n/.test(text.slice(opener.start, closer.start))) continue;
+      let availableOpen = opener.length - opener.usedOpen - opener.usedClose;
+      let availableClose = closer.length - closer.usedOpen - closer.usedClose;
+      if (availableOpen < (closer.character === "~" ? 2 : 1)) continue;
+      if (closer.character !== "~" && (opener.close || closer.open) &&
+          (availableOpen + availableClose) % 3 === 0 && (availableOpen % 3 !== 0 || availableClose % 3 !== 0)) continue;
+      while (availableOpen >= (closer.character === "~" ? 2 : 1) && availableClose >= (closer.character === "~" ? 2 : 1)) {
+        const count = availableOpen >= 2 && availableClose >= 2 ? 2 : 1;
+        for (let j = 0; j < count; j += 1) {
+          removed.add(opener.start + opener.length - opener.usedOpen - 1 - j);
+          removed.add(closer.start + closer.usedClose + j);
+        }
+        opener.usedOpen += count; closer.usedClose += count;
+        for (let nested = openIndex + 1; nested < closeIndex; nested += 1) { runs[nested].open = false; runs[nested].close = false; }
+        availableOpen -= count; availableClose -= count;
+      }
+    }
+  }
+  return text.split("").map((character, index) => removed.has(index) ? "" : character).join("");
+}
+
 function preserveLiteralMarkdownLinks(text) {
   const spans = [];
   let consumed = 0;
@@ -116,13 +171,13 @@ function preserveLiteralMarkdownLinks(text) {
     const close = tail.search(new RegExp("</" + tag[1] + "\\s*>", "i"));
     spans.push([tag.index + tag[0].length, close === -1 ? text.length : tag.index + tag[0].length + close]);
   }
-  return text.replace(/[&<\[]/g, (bracket, index) => {
+  return text.replace(/[&<\[*_~]/g, (bracket, index) => {
     const context = stripMarkdownContainers(text.slice(0, index));
     const indentation = context.slice(context.lastIndexOf("\n") + 1).match(/^[ \t]*/)[0];
-    return (bracket === "[" && isRawHtmlRowContext(text, index, true)) ||
+    return (/[\[*_~]/.test(bracket) && isRawHtmlRowContext(text, index, true)) ||
       spans.some(([start, end]) => index >= start && index < end) ||
       indentation.includes("\t") || indentation.length >= 4 ||
-      isProtocolCodeExample(context, context.length) ? ({ "[": "&#91;", "<": "&#60;", "&": "&#38;" })[bracket] : bracket;
+      isProtocolCodeExample(context, context.length) ? "&#" + bracket.codePointAt(0) + ";" : bracket;
   });
 }
 
@@ -193,8 +248,12 @@ const unicodeCaseFold = Object.freeze({
   "\ufb17": "\u0574\u056d",
 });
 
+function caseFoldLabel(label) {
+  return Array.from(label, (character) => unicodeCaseFold[character] ?? character.toLowerCase()).join("");
+}
+
 function visibleFootnoteBodies(text) {
-  const key = (label) => Array.from(label, (character) => unicodeCaseFold[character] ?? character.toLowerCase()).join("");
+  const key = caseFoldLabel;
   const definitions = [...text.matchAll(/^ {0,3}\[\^([^\[\]\x00-\x20]+)\]:[^\n]*(?:\n(?: {2,}|\t)[^\n]*)*/gm)];
   const references = (content) => {
     const visible = visibleMarkdownLinkLabels(content, false);
@@ -240,23 +299,96 @@ function visibleMarkdownLinkLabels(text, projectFootnotes = true) {
   for (const entry of text.matchAll(definitionPattern)) {
     const destination = entry[2] + (entry[3] ? " " + entry[3] : "");
     if (isVisibleLinkLabel(entry[1], true) && isVisibleLinkDestination(destination, false)) {
-      definitions.add(entry[1].trim().replace(/\s+/g, " ").toLowerCase());
+      definitions.add(caseFoldLabel(entry[1].trim().replace(/\s+/g, " ")));
       definitionBodies.add(entry[0]);
     }
   }
   const projected = (result + text.slice(consumed)).replace(definitionPattern, (source) => definitionBodies.has(source) ? "" : source);
-  const references = projected.replace(/\[([^\]]*)\]\[([^\]]*)\]/g, (source, label, reference, offset, whole) => !isEscapedMarkdownStart(whole, offset) && isVisibleLinkLabel(label) && isVisibleLinkLabel(reference || label, true) && definitions.has((reference || label).trim().replace(/\s+/g, " ").toLowerCase()) ? label : source);
-  return references.replace(/\[([^\]]+)\](?![\[(])/g, (source, label, offset, whole) => !isEscapedMarkdownStart(whole, offset) && isVisibleLinkLabel(label, true) && definitions.has(label.trim().replace(/\s+/g, " ").toLowerCase()) ? label : source);
+  const references = projected.replace(/\[([^\]]*)\]\[([^\]]*)\]/g, (source, label, reference, offset, whole) => !isEscapedMarkdownStart(whole, offset) && isVisibleLinkLabel(label) && isVisibleLinkLabel(reference || label, true) && definitions.has(caseFoldLabel((reference || label).trim().replace(/\s+/g, " "))) ? label : source);
+  return references.replace(/\[([^\]]+)\](?![\[(])/g, (source, label, offset, whole) => !isEscapedMarkdownStart(whole, offset) && isVisibleLinkLabel(label, true) && definitions.has(caseFoldLabel(label.trim().replace(/\s+/g, " "))) ? label : source);
 }
+
+function htmlCommentEnd(source, start) {
+  if (source.startsWith("<!-->", start)) return start + 5;
+  if (source.startsWith("<!--->", start)) return start + 6;
+  const close = /--!?>/g;
+  close.lastIndex = start + 4;
+  const match = close.exec(source);
+  return match ? match.index + match[0].length : null;
+}
+
+function withoutHtmlComments(source) {
+  let result = "", cursor = 0, start;
+  while ((start = source.indexOf("<!--", cursor)) >= 0) {
+    const end = htmlCommentEnd(source, start) ?? source.length;
+    result += source.slice(cursor, start) + source.slice(start, end).replace(/[^\r\n]/g, "");
+    cursor = end;
+  }
+  return result + source.slice(cursor);
+}
+
+// HTML5 legacy named references: Python html.entities.html5 keys without semicolons.
+const LEGACY_HTML_NAMES = Object.freeze({
+  "Aacute": "\u00c1", "aacute": "\u00e1", "Acirc": "\u00c2", "acirc": "\u00e2", "acute": "\u00b4", "AElig": "\u00c6", "aelig": "\u00e6", "Agrave": "\u00c0",
+  "agrave": "\u00e0", "AMP": "&", "amp": "&", "Aring": "\u00c5", "aring": "\u00e5", "Atilde": "\u00c3", "atilde": "\u00e3", "Auml": "\u00c4",
+  "auml": "\u00e4", "brvbar": "\u00a6", "Ccedil": "\u00c7", "ccedil": "\u00e7", "cedil": "\u00b8", "cent": "\u00a2", "COPY": "\u00a9", "copy": "\u00a9",
+  "curren": "\u00a4", "deg": "\u00b0", "divide": "\u00f7", "Eacute": "\u00c9", "eacute": "\u00e9", "Ecirc": "\u00ca", "ecirc": "\u00ea", "Egrave": "\u00c8",
+  "egrave": "\u00e8", "ETH": "\u00d0", "eth": "\u00f0", "Euml": "\u00cb", "euml": "\u00eb", "frac12": "\u00bd", "frac14": "\u00bc", "frac34": "\u00be",
+  "GT": ">", "gt": ">", "Iacute": "\u00cd", "iacute": "\u00ed", "Icirc": "\u00ce", "icirc": "\u00ee", "iexcl": "\u00a1", "Igrave": "\u00cc",
+  "igrave": "\u00ec", "iquest": "\u00bf", "Iuml": "\u00cf", "iuml": "\u00ef", "laquo": "\u00ab", "LT": "<", "lt": "<", "macr": "\u00af",
+  "micro": "\u00b5", "middot": "\u00b7", "nbsp": "\u00a0", "not": "\u00ac", "Ntilde": "\u00d1", "ntilde": "\u00f1", "Oacute": "\u00d3", "oacute": "\u00f3",
+  "Ocirc": "\u00d4", "ocirc": "\u00f4", "Ograve": "\u00d2", "ograve": "\u00f2", "ordf": "\u00aa", "ordm": "\u00ba", "Oslash": "\u00d8", "oslash": "\u00f8",
+  "Otilde": "\u00d5", "otilde": "\u00f5", "Ouml": "\u00d6", "ouml": "\u00f6", "para": "\u00b6", "plusmn": "\u00b1", "pound": "\u00a3", "QUOT": "\"",
+  "quot": "\"", "raquo": "\u00bb", "REG": "\u00ae", "reg": "\u00ae", "sect": "\u00a7", "shy": "\u00ad", "sup1": "\u00b9", "sup2": "\u00b2",
+  "sup3": "\u00b3", "szlig": "\u00df", "THORN": "\u00de", "thorn": "\u00fe", "times": "\u00d7", "Uacute": "\u00da", "uacute": "\u00fa", "Ucirc": "\u00db",
+  "ucirc": "\u00fb", "Ugrave": "\u00d9", "ugrave": "\u00f9", "uml": "\u00a8", "Uuml": "\u00dc", "uuml": "\u00fc", "Yacute": "\u00dd", "yacute": "\u00fd",
+  "yen": "\u00a5", "yuml": "\u00ff",
+});
+// Valid semicolon-terminated HTML5 names take precedence over legacy prefixes.
+const HTML_ENTITY_NAMES = new Set([
+  "AElig|AMP|Aacute|Abreve|Acirc|Acy|Afr|Agrave|Alpha|Amacr|And|Aogon|Aopf|ApplyFunction|Aring|Ascr|Assign|Atilde|Auml|Backslash|Barv|Barwed|Bcy|Because|Bernoullis|Beta|Bfr|Bopf|Breve|Bscr|Bumpeq|CHcy|COPY|Cacute|Cap|CapitalDifferentialD|Cayleys|Ccaron|Ccedil|Ccirc|Cconint|Cdot|Cedilla|CenterDot|Cfr|Chi|CircleDot|CircleMinus|CirclePlus|CircleTimes|ClockwiseContourIntegral|CloseCurlyDoubleQuote|CloseCurlyQuote|Colon|Colone|Congruent|Conint|ContourIntegral|Copf|Coproduct|CounterClockwiseContourIntegral|Cross|Cscr|Cup|CupCap|DD|DDotrahd|DJcy|DScy|DZcy|Dagger|Darr|Dashv|Dcaron|Dcy|Del|Delta|Dfr|DiacriticalAcute|DiacriticalDot",
+  "DiacriticalDoubleAcute|DiacriticalGrave|DiacriticalTilde|Diamond|DifferentialD|Dopf|Dot|DotDot|DotEqual|DoubleContourIntegral|DoubleDot|DoubleDownArrow|DoubleLeftArrow|DoubleLeftRightArrow|DoubleLeftTee|DoubleLongLeftArrow|DoubleLongLeftRightArrow|DoubleLongRightArrow|DoubleRightArrow|DoubleRightTee|DoubleUpArrow|DoubleUpDownArrow|DoubleVerticalBar|DownArrow|DownArrowBar|DownArrowUpArrow|DownBreve|DownLeftRightVector|DownLeftTeeVector|DownLeftVector|DownLeftVectorBar|DownRightTeeVector|DownRightVector|DownRightVectorBar|DownTee|DownTeeArrow|Downarrow|Dscr|Dstrok|ENG|ETH|Eacute|Ecaron|Ecirc|Ecy|Edot|Efr|Egrave|Element|Emacr|EmptySmallSquare|EmptyVerySmallSquare|Eogon|Eopf|Epsilon|Equal|EqualTilde|Equilibrium|Escr|Esim|Eta|Euml|Exists|ExponentialE|Fcy|Ffr|FilledSmallSquare|FilledVerySmallSquare|Fopf|ForAll|Fouriertrf|Fscr|GJcy|GT|Gamma|Gammad|Gbreve|Gcedil|Gcirc|Gcy",
+  "Gdot|Gfr|Gg|Gopf|GreaterEqual|GreaterEqualLess|GreaterFullEqual|GreaterGreater|GreaterLess|GreaterSlantEqual|GreaterTilde|Gscr|Gt|HARDcy|Hacek|Hat|Hcirc|Hfr|HilbertSpace|Hopf|HorizontalLine|Hscr|Hstrok|HumpDownHump|HumpEqual|IEcy|IJlig|IOcy|Iacute|Icirc|Icy|Idot|Ifr|Igrave|Im|Imacr|ImaginaryI|Implies|Int|Integral|Intersection|InvisibleComma|InvisibleTimes|Iogon|Iopf|Iota|Iscr|Itilde|Iukcy|Iuml|Jcirc|Jcy|Jfr|Jopf|Jscr|Jsercy|Jukcy|KHcy|KJcy|Kappa|Kcedil|Kcy|Kfr|Kopf|Kscr|LJcy|LT|Lacute|Lambda|Lang|Laplacetrf|Larr|Lcaron|Lcedil|Lcy|LeftAngleBracket|LeftArrow|LeftArrowBar|LeftArrowRightArrow|LeftCeiling",
+  "LeftDoubleBracket|LeftDownTeeVector|LeftDownVector|LeftDownVectorBar|LeftFloor|LeftRightArrow|LeftRightVector|LeftTee|LeftTeeArrow|LeftTeeVector|LeftTriangle|LeftTriangleBar|LeftTriangleEqual|LeftUpDownVector|LeftUpTeeVector|LeftUpVector|LeftUpVectorBar|LeftVector|LeftVectorBar|Leftarrow|Leftrightarrow|LessEqualGreater|LessFullEqual|LessGreater|LessLess|LessSlantEqual|LessTilde|Lfr|Ll|Lleftarrow|Lmidot|LongLeftArrow|LongLeftRightArrow|LongRightArrow|Longleftarrow|Longleftrightarrow|Longrightarrow|Lopf|LowerLeftArrow|LowerRightArrow|Lscr|Lsh|Lstrok|Lt|Map|Mcy|MediumSpace|Mellintrf|Mfr|MinusPlus|Mopf|Mscr|Mu|NJcy|Nacute|Ncaron|Ncedil|Ncy|NegativeMediumSpace|NegativeThickSpace|NegativeThinSpace|NegativeVeryThinSpace|NestedGreaterGreater|NestedLessLess|NewLine|Nfr|NoBreak|NonBreakingSpace|Nopf|Not|NotCongruent|NotCupCap|NotDoubleVerticalBar|NotElement|NotEqual|NotEqualTilde|NotExists|NotGreater|NotGreaterEqual|NotGreaterFullEqual",
+  "NotGreaterGreater|NotGreaterLess|NotGreaterSlantEqual|NotGreaterTilde|NotHumpDownHump|NotHumpEqual|NotLeftTriangle|NotLeftTriangleBar|NotLeftTriangleEqual|NotLess|NotLessEqual|NotLessGreater|NotLessLess|NotLessSlantEqual|NotLessTilde|NotNestedGreaterGreater|NotNestedLessLess|NotPrecedes|NotPrecedesEqual|NotPrecedesSlantEqual|NotReverseElement|NotRightTriangle|NotRightTriangleBar|NotRightTriangleEqual|NotSquareSubset|NotSquareSubsetEqual|NotSquareSuperset|NotSquareSupersetEqual|NotSubset|NotSubsetEqual|NotSucceeds|NotSucceedsEqual|NotSucceedsSlantEqual|NotSucceedsTilde|NotSuperset|NotSupersetEqual|NotTilde|NotTildeEqual|NotTildeFullEqual|NotTildeTilde|NotVerticalBar|Nscr|Ntilde|Nu|OElig|Oacute|Ocirc|Ocy|Odblac|Ofr|Ograve|Omacr|Omega|Omicron|Oopf|OpenCurlyDoubleQuote|OpenCurlyQuote|Or|Oscr|Oslash|Otilde|Otimes|Ouml|OverBar|OverBrace|OverBracket|OverParenthesis|PartialD|Pcy|Pfr|Phi|Pi|PlusMinus|Poincareplane|Popf|Pr|Precedes|PrecedesEqual|PrecedesSlantEqual|PrecedesTilde",
+  "Prime|Product|Proportion|Proportional|Pscr|Psi|QUOT|Qfr|Qopf|Qscr|RBarr|REG|Racute|Rang|Rarr|Rarrtl|Rcaron|Rcedil|Rcy|Re|ReverseElement|ReverseEquilibrium|ReverseUpEquilibrium|Rfr|Rho|RightAngleBracket|RightArrow|RightArrowBar|RightArrowLeftArrow|RightCeiling|RightDoubleBracket|RightDownTeeVector|RightDownVector|RightDownVectorBar|RightFloor|RightTee|RightTeeArrow|RightTeeVector|RightTriangle|RightTriangleBar|RightTriangleEqual|RightUpDownVector|RightUpTeeVector|RightUpVector|RightUpVectorBar|RightVector|RightVectorBar|Rightarrow|Ropf|RoundImplies|Rrightarrow|Rscr|Rsh|RuleDelayed|SHCHcy|SHcy|SOFTcy|Sacute|Sc|Scaron|Scedil|Scirc|Scy|Sfr|ShortDownArrow|ShortLeftArrow|ShortRightArrow|ShortUpArrow|Sigma|SmallCircle|Sopf|Sqrt|Square|SquareIntersection|SquareSubset|SquareSubsetEqual|SquareSuperset|SquareSupersetEqual|SquareUnion|Sscr",
+  "Star|Sub|Subset|SubsetEqual|Succeeds|SucceedsEqual|SucceedsSlantEqual|SucceedsTilde|SuchThat|Sum|Sup|Superset|SupersetEqual|Supset|THORN|TRADE|TSHcy|TScy|Tab|Tau|Tcaron|Tcedil|Tcy|Tfr|Therefore|Theta|ThickSpace|ThinSpace|Tilde|TildeEqual|TildeFullEqual|TildeTilde|Topf|TripleDot|Tscr|Tstrok|Uacute|Uarr|Uarrocir|Ubrcy|Ubreve|Ucirc|Ucy|Udblac|Ufr|Ugrave|Umacr|UnderBar|UnderBrace|UnderBracket|UnderParenthesis|Union|UnionPlus|Uogon|Uopf|UpArrow|UpArrowBar|UpArrowDownArrow|UpDownArrow|UpEquilibrium|UpTee|UpTeeArrow|Uparrow|Updownarrow|UpperLeftArrow|UpperRightArrow|Upsi|Upsilon|Uring|Uscr|Utilde|Uuml|VDash|Vbar|Vcy|Vdash|Vdashl|Vee|Verbar|Vert",
+  "VerticalBar|VerticalLine|VerticalSeparator|VerticalTilde|VeryThinSpace|Vfr|Vopf|Vscr|Vvdash|Wcirc|Wedge|Wfr|Wopf|Wscr|Xfr|Xi|Xopf|Xscr|YAcy|YIcy|YUcy|Yacute|Ycirc|Ycy|Yfr|Yopf|Yscr|Yuml|ZHcy|Zacute|Zcaron|Zcy|Zdot|ZeroWidthSpace|Zeta|Zfr|Zopf|Zscr|aacute|abreve|ac|acE|acd|acirc|acute|acy|aelig|af|afr|agrave|alefsym|aleph|alpha|amacr|amalg|amp|and|andand|andd|andslope|andv|ang|ange|angle|angmsd|angmsdaa|angmsdab|angmsdac|angmsdad|angmsdae|angmsdaf|angmsdag|angmsdah|angrt|angrtvb|angrtvbd|angsph|angst|angzarr|aogon",
+  "aopf|ap|apE|apacir|ape|apid|apos|approx|approxeq|aring|ascr|ast|asymp|asympeq|atilde|auml|awconint|awint|bNot|backcong|backepsilon|backprime|backsim|backsimeq|barvee|barwed|barwedge|bbrk|bbrktbrk|bcong|bcy|bdquo|becaus|because|bemptyv|bepsi|bernou|beta|beth|between|bfr|bigcap|bigcirc|bigcup|bigodot|bigoplus|bigotimes|bigsqcup|bigstar|bigtriangledown|bigtriangleup|biguplus|bigvee|bigwedge|bkarow|blacklozenge|blacksquare|blacktriangle|blacktriangledown|blacktriangleleft|blacktriangleright|blank|blk12|blk14|blk34|block|bne|bnequiv|bnot|bopf|bot|bottom|bowtie|boxDL|boxDR|boxDl|boxDr|boxH|boxHD|boxHU",
+  "boxHd|boxHu|boxUL|boxUR|boxUl|boxUr|boxV|boxVH|boxVL|boxVR|boxVh|boxVl|boxVr|boxbox|boxdL|boxdR|boxdl|boxdr|boxh|boxhD|boxhU|boxhd|boxhu|boxminus|boxplus|boxtimes|boxuL|boxuR|boxul|boxur|boxv|boxvH|boxvL|boxvR|boxvh|boxvl|boxvr|bprime|breve|brvbar|bscr|bsemi|bsim|bsime|bsol|bsolb|bsolhsub|bull|bullet|bump|bumpE|bumpe|bumpeq|cacute|cap|capand|capbrcup|capcap|capcup|capdot|caps|caret|caron|ccaps|ccaron|ccedil|ccirc|ccups|ccupssm|cdot|cedil|cemptyv|cent|centerdot|cfr|chcy|check|checkmark|chi|cir",
+  "cirE|circ|circeq|circlearrowleft|circlearrowright|circledR|circledS|circledast|circledcirc|circleddash|cire|cirfnint|cirmid|cirscir|clubs|clubsuit|colon|colone|coloneq|comma|commat|comp|compfn|complement|complexes|cong|congdot|conint|copf|coprod|copy|copysr|crarr|cross|cscr|csub|csube|csup|csupe|ctdot|cudarrl|cudarrr|cuepr|cuesc|cularr|cularrp|cup|cupbrcap|cupcap|cupcup|cupdot|cupor|cups|curarr|curarrm|curlyeqprec|curlyeqsucc|curlyvee|curlywedge|curren|curvearrowleft|curvearrowright|cuvee|cuwed|cwconint|cwint|cylcty|dArr|dHar|dagger|daleth|darr|dash|dashv|dbkarow|dblac|dcaron|dcy|dd|ddagger",
+  "ddarr|ddotseq|deg|delta|demptyv|dfisht|dfr|dharl|dharr|diam|diamond|diamondsuit|diams|die|digamma|disin|div|divide|divideontimes|divonx|djcy|dlcorn|dlcrop|dollar|dopf|dot|doteq|doteqdot|dotminus|dotplus|dotsquare|doublebarwedge|downarrow|downdownarrows|downharpoonleft|downharpoonright|drbkarow|drcorn|drcrop|dscr|dscy|dsol|dstrok|dtdot|dtri|dtrif|duarr|duhar|dwangle|dzcy|dzigrarr|eDDot|eDot|eacute|easter|ecaron|ecir|ecirc|ecolon|ecy|edot|ee|efDot|efr|eg|egrave|egs|egsdot|el|elinters|ell|els|elsdot|emacr|empty|emptyset|emptyv|emsp|emsp13|emsp14",
+  "eng|ensp|eogon|eopf|epar|eparsl|eplus|epsi|epsilon|epsiv|eqcirc|eqcolon|eqsim|eqslantgtr|eqslantless|equals|equest|equiv|equivDD|eqvparsl|erDot|erarr|escr|esdot|esim|eta|eth|euml|euro|excl|exist|expectation|exponentiale|fallingdotseq|fcy|female|ffilig|fflig|ffllig|ffr|filig|fjlig|flat|fllig|fltns|fnof|fopf|forall|fork|forkv|fpartint|frac12|frac13|frac14|frac15|frac16|frac18|frac23|frac25|frac34|frac35|frac38|frac45|frac56|frac58|frac78|frasl|frown|fscr|gE|gEl|gacute|gamma|gammad|gap|gbreve|gcirc|gcy|gdot|ge",
+  "gel|geq|geqq|geqslant|ges|gescc|gesdot|gesdoto|gesdotol|gesl|gesles|gfr|gg|ggg|gimel|gjcy|gl|glE|gla|glj|gnE|gnap|gnapprox|gne|gneq|gneqq|gnsim|gopf|grave|gscr|gsim|gsime|gsiml|gt|gtcc|gtcir|gtdot|gtlPar|gtquest|gtrapprox|gtrarr|gtrdot|gtreqless|gtreqqless|gtrless|gtrsim|gvertneqq|gvnE|hArr|hairsp|half|hamilt|hardcy|harr|harrcir|harrw|hbar|hcirc|hearts|heartsuit|hellip|hercon|hfr|hksearow|hkswarow|hoarr|homtht|hookleftarrow|hookrightarrow|hopf|horbar|hscr|hslash|hstrok|hybull|hyphen|iacute|ic|icirc|icy",
+  "iecy|iexcl|iff|ifr|igrave|ii|iiiint|iiint|iinfin|iiota|ijlig|imacr|image|imagline|imagpart|imath|imof|imped|in|incare|infin|infintie|inodot|int|intcal|integers|intercal|intlarhk|intprod|iocy|iogon|iopf|iota|iprod|iquest|iscr|isin|isinE|isindot|isins|isinsv|isinv|it|itilde|iukcy|iuml|jcirc|jcy|jfr|jmath|jopf|jscr|jsercy|jukcy|kappa|kappav|kcedil|kcy|kfr|kgreen|khcy|kjcy|kopf|kscr|lAarr|lArr|lAtail|lBarr|lE|lEg|lHar|lacute|laemptyv|lagran|lambda|lang|langd|langle|lap|laquo",
+  "larr|larrb|larrbfs|larrfs|larrhk|larrlp|larrpl|larrsim|larrtl|lat|latail|late|lates|lbarr|lbbrk|lbrace|lbrack|lbrke|lbrksld|lbrkslu|lcaron|lcedil|lceil|lcub|lcy|ldca|ldquo|ldquor|ldrdhar|ldrushar|ldsh|le|leftarrow|leftarrowtail|leftharpoondown|leftharpoonup|leftleftarrows|leftrightarrow|leftrightarrows|leftrightharpoons|leftrightsquigarrow|leftthreetimes|leg|leq|leqq|leqslant|les|lescc|lesdot|lesdoto|lesdotor|lesg|lesges|lessapprox|lessdot|lesseqgtr|lesseqqgtr|lessgtr|lesssim|lfisht|lfloor|lfr|lg|lgE|lhard|lharu|lharul|lhblk|ljcy|ll|llarr|llcorner|llhard|lltri|lmidot|lmoust|lmoustache|lnE|lnap|lnapprox",
+  "lne|lneq|lneqq|lnsim|loang|loarr|lobrk|longleftarrow|longleftrightarrow|longmapsto|longrightarrow|looparrowleft|looparrowright|lopar|lopf|loplus|lotimes|lowast|lowbar|loz|lozenge|lozf|lpar|lparlt|lrarr|lrcorner|lrhar|lrhard|lrm|lrtri|lsaquo|lscr|lsh|lsim|lsime|lsimg|lsqb|lsquo|lsquor|lstrok|lt|ltcc|ltcir|ltdot|lthree|ltimes|ltlarr|ltquest|ltrPar|ltri|ltrie|ltrif|lurdshar|luruhar|lvertneqq|lvnE|mDDot|macr|male|malt|maltese|map|mapsto|mapstodown|mapstoleft|mapstoup|marker|mcomma|mcy|mdash|measuredangle|mfr|mho|micro|mid|midast|midcir|middot|minus|minusb",
+  "minusd|minusdu|mlcp|mldr|mnplus|models|mopf|mp|mscr|mstpos|mu|multimap|mumap|nGg|nGt|nGtv|nLeftarrow|nLeftrightarrow|nLl|nLt|nLtv|nRightarrow|nVDash|nVdash|nabla|nacute|nang|nap|napE|napid|napos|napprox|natur|natural|naturals|nbsp|nbump|nbumpe|ncap|ncaron|ncedil|ncong|ncongdot|ncup|ncy|ndash|ne|neArr|nearhk|nearr|nearrow|nedot|nequiv|nesear|nesim|nexist|nexists|nfr|ngE|nge|ngeq|ngeqq|ngeqslant|nges|ngsim|ngt|ngtr|nhArr|nharr|nhpar|ni|nis|nisd|niv|njcy|nlArr|nlE|nlarr|nldr|nle",
+  "nleftarrow|nleftrightarrow|nleq|nleqq|nleqslant|nles|nless|nlsim|nlt|nltri|nltrie|nmid|nopf|not|notin|notinE|notindot|notinva|notinvb|notinvc|notni|notniva|notnivb|notnivc|npar|nparallel|nparsl|npart|npolint|npr|nprcue|npre|nprec|npreceq|nrArr|nrarr|nrarrc|nrarrw|nrightarrow|nrtri|nrtrie|nsc|nsccue|nsce|nscr|nshortmid|nshortparallel|nsim|nsime|nsimeq|nsmid|nspar|nsqsube|nsqsupe|nsub|nsubE|nsube|nsubset|nsubseteq|nsubseteqq|nsucc|nsucceq|nsup|nsupE|nsupe|nsupset|nsupseteq|nsupseteqq|ntgl|ntilde|ntlg|ntriangleleft|ntrianglelefteq|ntriangleright|ntrianglerighteq|nu|num|numero|numsp|nvDash",
+  "nvHarr|nvap|nvdash|nvge|nvgt|nvinfin|nvlArr|nvle|nvlt|nvltrie|nvrArr|nvrtrie|nvsim|nwArr|nwarhk|nwarr|nwarrow|nwnear|oS|oacute|oast|ocir|ocirc|ocy|odash|odblac|odiv|odot|odsold|oelig|ofcir|ofr|ogon|ograve|ogt|ohbar|ohm|oint|olarr|olcir|olcross|oline|olt|omacr|omega|omicron|omid|ominus|oopf|opar|operp|oplus|or|orarr|ord|order|orderof|ordf|ordm|origof|oror|orslope|orv|oscr|oslash|osol|otilde|otimes|otimesas|ouml|ovbar|par|para|parallel|parsim|parsl|part|pcy|percnt|period",
+  "permil|perp|pertenk|pfr|phi|phiv|phmmat|phone|pi|pitchfork|piv|planck|planckh|plankv|plus|plusacir|plusb|pluscir|plusdo|plusdu|pluse|plusmn|plussim|plustwo|pm|pointint|popf|pound|pr|prE|prap|prcue|pre|prec|precapprox|preccurlyeq|preceq|precnapprox|precneqq|precnsim|precsim|prime|primes|prnE|prnap|prnsim|prod|profalar|profline|profsurf|prop|propto|prsim|prurel|pscr|psi|puncsp|qfr|qint|qopf|qprime|qscr|quaternions|quatint|quest|questeq|quot|rAarr|rArr|rAtail|rBarr|rHar|race|racute|radic|raemptyv|rang|rangd|range|rangle",
+  "raquo|rarr|rarrap|rarrb|rarrbfs|rarrc|rarrfs|rarrhk|rarrlp|rarrpl|rarrsim|rarrtl|rarrw|ratail|ratio|rationals|rbarr|rbbrk|rbrace|rbrack|rbrke|rbrksld|rbrkslu|rcaron|rcedil|rceil|rcub|rcy|rdca|rdldhar|rdquo|rdquor|rdsh|real|realine|realpart|reals|rect|reg|rfisht|rfloor|rfr|rhard|rharu|rharul|rho|rhov|rightarrow|rightarrowtail|rightharpoondown|rightharpoonup|rightleftarrows|rightleftharpoons|rightrightarrows|rightsquigarrow|rightthreetimes|ring|risingdotseq|rlarr|rlhar|rlm|rmoust|rmoustache|rnmid|roang|roarr|robrk|ropar|ropf|roplus|rotimes|rpar|rpargt|rppolint|rrarr|rsaquo|rscr|rsh|rsqb|rsquo",
+  "rsquor|rthree|rtimes|rtri|rtrie|rtrif|rtriltri|ruluhar|rx|sacute|sbquo|sc|scE|scap|scaron|sccue|sce|scedil|scirc|scnE|scnap|scnsim|scpolint|scsim|scy|sdot|sdotb|sdote|seArr|searhk|searr|searrow|sect|semi|seswar|setminus|setmn|sext|sfr|sfrown|sharp|shchcy|shcy|shortmid|shortparallel|shy|sigma|sigmaf|sigmav|sim|simdot|sime|simeq|simg|simgE|siml|simlE|simne|simplus|simrarr|slarr|smallsetminus|smashp|smeparsl|smid|smile|smt|smte|smtes|softcy|sol|solb|solbar|sopf|spades|spadesuit|spar|sqcap|sqcaps|sqcup",
+  "sqcups|sqsub|sqsube|sqsubset|sqsubseteq|sqsup|sqsupe|sqsupset|sqsupseteq|squ|square|squarf|squf|srarr|sscr|ssetmn|ssmile|sstarf|star|starf|straightepsilon|straightphi|strns|sub|subE|subdot|sube|subedot|submult|subnE|subne|subplus|subrarr|subset|subseteq|subseteqq|subsetneq|subsetneqq|subsim|subsub|subsup|succ|succapprox|succcurlyeq|succeq|succnapprox|succneqq|succnsim|succsim|sum|sung|sup|sup1|sup2|sup3|supE|supdot|supdsub|supe|supedot|suphsol|suphsub|suplarr|supmult|supnE|supne|supplus|supset|supseteq|supseteqq|supsetneq|supsetneqq|supsim|supsub|supsup|swArr|swarhk|swarr|swarrow|swnwar",
+  "szlig|target|tau|tbrk|tcaron|tcedil|tcy|tdot|telrec|tfr|there4|therefore|theta|thetasym|thetav|thickapprox|thicksim|thinsp|thkap|thksim|thorn|tilde|times|timesb|timesbar|timesd|tint|toea|top|topbot|topcir|topf|topfork|tosa|tprime|trade|triangle|triangledown|triangleleft|trianglelefteq|triangleq|triangleright|trianglerighteq|tridot|trie|triminus|triplus|trisb|tritime|trpezium|tscr|tscy|tshcy|tstrok|twixt|twoheadleftarrow|twoheadrightarrow|uArr|uHar|uacute|uarr|ubrcy|ubreve|ucirc|ucy|udarr|udblac|udhar|ufisht|ufr|ugrave|uharl|uharr|uhblk|ulcorn|ulcorner|ulcrop|ultri|umacr|uml",
+  "uogon|uopf|uparrow|updownarrow|upharpoonleft|upharpoonright|uplus|upsi|upsih|upsilon|upuparrows|urcorn|urcorner|urcrop|uring|urtri|uscr|utdot|utilde|utri|utrif|uuarr|uuml|uwangle|vArr|vBar|vBarv|vDash|vangrt|varepsilon|varkappa|varnothing|varphi|varpi|varpropto|varr|varrho|varsigma|varsubsetneq|varsubsetneqq|varsupsetneq|varsupsetneqq|vartheta|vartriangleleft|vartriangleright|vcy|vdash|vee|veebar|veeeq|vellip|verbar|vert|vfr|vltri|vnsub|vnsup|vopf|vprop|vrtri|vscr|vsubnE|vsubne|vsupnE|vsupne|vzigzag|wcirc|wedbar|wedge|wedgeq|weierp|wfr|wopf|wp|wr|wreath|wscr|xcap|xcirc|xcup",
+  "xdtri|xfr|xhArr|xharr|xi|xlArr|xlarr|xmap|xnis|xodot|xopf|xoplus|xotime|xrArr|xrarr|xscr|xsqcup|xuplus|xutri|xvee|xwedge|yacute|yacy|ycirc|ycy|yen|yfr|yicy|yopf|yscr|yucy|yuml|zacute|zcaron|zcy|zdot|zeetrf|zeta|zfr|zhcy|zigrarr|zopf|zscr|zwj|zwnj",
+].join("|").split("|"));
+const legacyHtmlNames = Object.keys(LEGACY_HTML_NAMES).sort((a, b) => b.length - a.length);
 
 // Normalize only human-visible negative evidence; protocol and clocks stay raw.
 function visibleCodexReviewText(value) {
   // Parse raw structural delimiters before decoding text entities: an encoded
   // quote is attribute data, and an encoded angle bracket cannot create a tag.
-  const raw = String(value || "").replace(/<!--[\s\S]*?(?:-->|$)/g, (comment) => comment.replace(/[^\r\n]/g, ""));
+  const raw = withoutHtmlComments(String(value || ""));
   const literalSafe = preserveLiteralMarkdownLinks(raw);
-  const htmlReferences = literalSafe.replace(/&#(?:x[0-9a-f]+|[0-9]+);?/gi, (entity, index) =>
-    entity.endsWith(";") || !isRawHtmlRowContext(literalSafe, index, true) ? entity : entity + ";");
+  const legacySafe = literalSafe.replace(/&([A-Za-z][A-Za-z0-9]*)(;?)/g, (entity, token, semicolon, index) => {
+    if ((semicolon && HTML_ENTITY_NAMES.has(token)) || !isRawHtmlRowContext(literalSafe, index, true)) return entity;
+    const name = legacyHtmlNames.find((candidate) => token.startsWith(candidate));
+    return name ? Array.from(LEGACY_HTML_NAMES[name], (character) => "&#" + character.codePointAt(0) + ";").join("") + token.slice(name.length) + semicolon : entity;
+  });
+  const htmlReferences = legacySafe.replace(/&#(?:x[0-9a-f]+|[0-9]+);?/gi, (entity, index) =>
+    entity.endsWith(";") || !isRawHtmlRowContext(legacySafe, index, true) ? entity : entity + ";");
   const validTag = /^<[A-Za-z][A-Za-z0-9-]*(?:[ \t\r\n]+[A-Za-z_:][A-Za-z0-9_.:-]*(?:[ \t\r\n]*=[ \t\r\n]*(?:"[^"]*"|'[^']*'|[^ \t\r\n"'=<>`]+))?)*[ \t\r\n]*\/?>$|^<\/[A-Za-z][A-Za-z0-9-]*[ \t\r\n]*>$/;
   const images = htmlReferences.replace(/<img\b((?:[^"'<>]|"[^"]*"|'[^']*')*)>/gi, (tag, attributes, offset) => {
     if (!validTag.test(tag) && !isRawHtmlRowContext(htmlReferences, offset, true)) return tag;
@@ -268,14 +400,32 @@ function visibleCodexReviewText(value) {
     return point > 0 && point <= 0x10ffff && !(point >= 0xd800 && point <= 0xdfff) ? String.fromCodePoint(point) : entity;
   }).replace(/&([A-Za-z][A-Za-z0-9]*);/g, (entity, name) => Object.hasOwn(HTML_SPACING_ENTITIES, name) ? HTML_SPACING_ENTITIES[name] : entity);
   return ["", " "].flatMap((separator) => {
-    const visible = decode(visibleMarkdownLinkLabels(images.replace(/<\/?[A-Za-z][A-Za-z0-9-]*(?:[^"'<>]|"[^"]*"|'[^']*')*>/g, (tag, offset) => validTag.test(tag) || isRawHtmlRowContext(images, offset, true) ? separator : tag))).replace(/[*_~`]/g, "");
+    const visible = decode(activeMarkdownEmphasis(visibleMarkdownLinkLabels(images.replace(/<\/?[A-Za-z][A-Za-z0-9-]*(?:[^"'<>]|"[^"]*"|'[^']*')*>/g, (tag, offset) => validTag.test(tag) || isRawHtmlRowContext(images, offset, true) ? separator : tag))));
     return [visible.replace(/\p{Default_Ignorable_Code_Point}/gu, ""), visible.replace(/\p{Default_Ignorable_Code_Point}/gu, " ")];
-  }).join(" ").replace(/\s+/g, " ");
+  }).join(" ").replace(/[^\S\n]+/g, " ").replace(/\n(?: *\n)+/g, "\n\n").replace(/(?<!\n)\n(?!\n)/g, " ");
+}
+
+function hasPositiveFindingStatement(text) {
+  const paragraphs = String(text).replace(/\r\n/g, "\n").split(/[\r\n][ \t\f\v]*[\r\n]/);
+  return paragraphs.some((paragraph) => paragraph.replace(/[ \t\r\n\f\v]+/g, " ")
+    .split(/[.!?;,]|\b(?:and|or|but|however|yet)\b/i).some((clause) => {
+      if (/\b(?:no|zero|not|without|never|cannot)\b|\b[\p{L}]+n['’]t\b/iu.test(clause) ||
+          /\b(?:resolved|fixed|addressed|cleared|removed|closed)\b/i.test(clause)) return false;
+      const noun = "(?<![\\p{L}\\p{N}_\\p{Pd}])(?:issues?|findings?|problems?|bugs?)(?![\\p{L}\\p{N}_\\p{Pd}])";
+      if (!new RegExp(noun, "iu").test(clause)) return false;
+      const counts = [...clause.matchAll(new RegExp("(?<![\\p{L}\\p{N}_])[*_~`]*([0-9]+)[*_~`]* +(?:[\\p{L}-]+ +)*?" + noun, "giu"))];
+      if (counts.some((match) => !/^0+$/.test(match[1]))) return true;
+      const reporting = clause.replace(new RegExp("(?<![\\p{L}\\p{N}_])[*_~`]*0+[*_~`]* +(?:[\\p{L}-]+ +)*?" + noun, "giu"), "");
+      const reportPrefix = new RegExp("\\b(?:found|[\\p{L}]+ed) +(?:[\\p{L}-]+ +)*?" + noun, "iu");
+      const reportSubject = new RegExp("(?:(?:a|an|one|some|several|multiple|[0-9]+) +)?" + noun + " +(?:(?:is|are|was|were|has|have|been) +)*(?:found|[\\p{L}]+ed|remains?|exists?)\\b", "iu");
+      const existential = new RegExp("\\bthere +(?:is|are) +(?:[\\p{L}-]+ +)*?" + noun, "iu");
+      return reportPrefix.test(reporting) || reportSubject.test(reporting) || existential.test(reporting);
+    }));
 }
 
 function hasContradictoryCodexPresentation(body) {
-  const visible = visibleCodexReviewText(body).replace(/\bfound\s+(?:no|0)\s+(?:issues?|bugs?)\b/gi, "");
-  return /\b(?:found|unresolved|issues?|findings?|bugs?|failed|failure|running|pending|cancelled|incomplete|in.progress|not.completed|changes.requested|security.concerns?|do.not.merge|P[0-2])\b/i.test(visible);
+  const visible = visibleCodexReviewText(body);
+  return hasPositiveFindingStatement(visible) || /\b(?:unresolved|failed|failure|running|pending|cancelled|incomplete|in.progress|not.completed|changes.requested|security.concerns?|do.not.merge|P[0-2])\b/i.test(visible);
 }
 
 function hasRenderedCodexSectionRow(body, label) {
@@ -356,34 +506,60 @@ export function isCodexReviewWakeupComment(body) {
     .test(String(body || ""));
 }
 
+function markdownTableCells(line) {
+  const value = String(line).trim();
+  const cells = []; let cursor = 0;
+  for (let index = 0; index < value.length; index++) if (value[index] === "|" && !isEscapedMarkdownStart(value, index)) {
+    cells.push(value.slice(cursor, index).trim()); cursor = index + 1;
+  }
+  if (!cells.length) return null;
+  cells.push(value.slice(cursor).trim());
+  if (value.startsWith("|")) cells.shift();
+  if (value.endsWith("|") && !isEscapedMarkdownStart(value, value.length - 1)) cells.pop();
+  return cells;
+}
+
+function isMarkdownTableBoundary(header, delimiter) {
+  const heading = markdownTableCells(header), cells = markdownTableCells(delimiter);
+  return Boolean(heading && cells && heading.length === cells.length && cells.length && cells.every(cell => /^:?-+:?$/.test(cell)));
+}
+
 // GFM raw HTML blocks cannot supply a live Markdown status-table row.
 function isRawHtmlRowContext(body, index, markdownOnly = false) {
-  let prefix = body.slice(0, index).replace(/<!--[\s\S]*?(?:-->|$)/g, (comment) => comment.replace(/[^\r\n]/g, ""));
+  let prefix = withoutHtmlComments(body.slice(0, index));
   if (markdownOnly) prefix = stripMarkdownContainers(prefix, true);
   const blockTags = new Set("address article aside base basefont blockquote body caption center col colgroup dd details dialog dir div dl dt fieldset figcaption figure footer form frame frameset h1 h2 h3 h4 h5 h6 head header hr html iframe legend li link main menu menuitem nav noframes ol optgroup option p param search section summary table tbody td tfoot th thead title tr track ul".split(" "));
   const voidTags = new Set("area base basefont br col embed frame hr img input link meta param source track wbr".split(" "));
   const containers = [];
   let until = null;
   let untilBlank = false;
+  let paragraph = false;
+  let tableActive = false;
+  let previousContent = "";
   let offset = 0;
   for (const line of (prefix.endsWith("\n") ? prefix.slice(0, -1) : prefix).split("\n")) {
     const lineOffset = offset;
     offset += line.length + 1;
-    if (isProtocolCodeExample(prefix, lineOffset + (line.match(/^ */)?.[0].length || 0))) continue;
-    if (until) { if (until.test(line)) until = null; continue; }
+    if (isProtocolCodeExample(prefix, lineOffset + (line.match(/^ */)?.[0].length || 0))) { paragraph = false; continue; }
+    if (until) { if (until.test(line)) until = null; paragraph = false; continue; }
     const raw = line.match(/^ {0,3}<(script|pre|style|textarea)(?=[\s>])/i);
     if (raw) {
       const end = new RegExp("</" + raw[1] + "\\s*>", "i");
       if (!end.test(line)) until = end;
+      paragraph = false;
       continue;
     }
-    if (/^ {0,3}<\?/.test(line)) { if (!line.includes("?>")) until = /\?>/; continue; }
-    if (/^ {0,3}<!\[CDATA\[/.test(line)) { if (!line.includes("]]>")) until = /\]\]>/; continue; }
-    if (/^ {0,3}<![A-Z]/.test(line)) { if (!line.includes(">")) until = />/; continue; }
+    if (/^ {0,3}<\?/.test(line)) { if (!line.includes("?>")) until = /\?>/; paragraph = false; continue; }
+    if (/^ {0,3}<!\[CDATA\[/.test(line)) { if (!line.includes("]]>")) until = /\]\]>/; paragraph = false; continue; }
+    if (/^ {0,3}<![A-Z]/.test(line)) { if (!line.includes(">")) until = />/; paragraph = false; continue; }
     if (!line.trim() && !(markdownOnly && !prefix.endsWith("\n") && offset > prefix.length)) untilBlank = false;
     const start = line.match(/^ {0,3}<\/?([a-z][a-z0-9-]*)(?=[\s/>])/i);
     const completeTag = /^ {0,3}<\/?[a-z][a-z0-9-]*(?:[^"'<>]|"[^"]*"|'[^']*')*>[ \t]*$/i.test(line);
-    if (start && (blockTags.has(start[1].toLowerCase()) || completeTag)) untilBlank = true;
+    if (start && (blockTags.has(start[1].toLowerCase()) || (!paragraph && completeTag))) untilBlank = true;
+    if (isMarkdownTableBoundary(previousContent, line)) tableActive = true;
+    else if (tableActive && !line.includes("|")) tableActive = false;
+    paragraph = !tableActive && !untilBlank && !!line.trim() && !/^ {0,3}(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|(?:[-*_][ \t]*){3,}$)/.test(line);
+    previousContent = line;
     if (start || containers.length) {
       for (const tag of line.matchAll(/<\/?([a-z][a-z0-9-]*)\b(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi)) {
         const name = tag[1].toLowerCase();
@@ -554,15 +730,24 @@ function isSectionClearingState(comment, section, headSha) {
 }
 
 function findingCompletedAt(comment, section, headSha) {
-  if (hasContradictoryCodexPresentation(comment.body)) return Date.parse(comment.updated_at || comment.created_at || "");
-  const presentation = String(comment.body || "").replace(/\s*<details>\s*<summary>ℹ️ About Codex in GitHub<\/summary>[\s\S]*<\/details>\s*$/, "");
-  if (/\b(?:P[0-2]|failed|failure|do.not.merge|found\s+(?:[1-9]\d*\s+)?issues?)\b/i.test(visibleCodexReviewText(presentation))) return Date.parse(comment.updated_at || comment.created_at || "");
+  const observed = Date.parse(comment.updated_at || comment.created_at || "");
   const state = typedCodexReviewState(comment, { negativeOnly: true });
   const other = section === "code_review" ? "security_review" : "code_review";
   const label = other === "code_review" ? "Code Review" : "Security Review";
-  if (state?.[other].status === null && hasRenderedCodexSectionRow(comment.body, label)) return Date.parse(comment.updated_at || comment.created_at || "");
+  let presentation = String(comment.body || "");
+  // A unique coherent completed counterpart row describes its own section.
+  // It cannot renew an older finding clock in this section. Global prose,
+  // malformed rows, and this section's warning remain observation-time evidence.
+  if (state?.[other].status === "completed") {
+    const otherCompleted = codeReviewCompletedAt(presentation, state[other].commit_sha, other);
+    if (Number.isFinite(otherCompleted) && otherCompleted <= observed + 999) {
+      const prefix = "| " + (other === "code_review" ? "📝" : "🛡️") + " **" + label + "** | ";
+      presentation = presentation.split("\n").filter((line) => !line.startsWith(prefix)).join("\n");
+    }
+  }
+  if (hasContradictoryCodexPresentation(presentation)) return observed;
+  if (state?.[other].status === null && hasRenderedCodexSectionRow(comment.body, label)) return observed;
   const completed = codeReviewCompletedAt(String(comment.body || ""), headSha, section);
-  const observed = Date.parse(comment.updated_at || comment.created_at || "");
   return Number.isFinite(completed) && completed <= observed + 999 ? completed : observed;
 }
 
