@@ -207,13 +207,28 @@ function preserveLiteralMarkdownLinks(text) {
     const close = tail.search(new RegExp("</" + tag[1] + "\\s*>", "i"));
     spans.push([tag.index + tag[0].length, close === -1 ? text.length : tag.index + tag[0].length + close]);
   }
+  let cachedLineStart = -1;
+  let cachedLineEnd = -1;
+  let cachedContext = null;
+  let stableLine = false;
   return text.replace(/[&<\[*_~]/g, (bracket, index) => {
-    const context = stripMarkdownContainers(text.slice(0, index));
-    const indentation = context.slice(context.lastIndexOf("\n") + 1).match(/^[ \t]*/)[0];
-    return (/[\[*_~]/.test(bracket) && isRawHtmlRowContext(text, index, true)) ||
-      spans.some(([start, end]) => index >= start && index < end) ||
-      indentation.includes("\t") || indentation.length >= 4 ||
-      isProtocolCodeExample(context, context.length) ? "&#" + bracket.codePointAt(0) + ";" : bracket;
+    if (index > cachedLineEnd) {
+      cachedLineStart = text.lastIndexOf("\n", index - 1) + 1;
+      const newline = text.indexOf("\n", index);
+      cachedLineEnd = newline === -1 ? text.length : newline;
+      cachedContext = null;
+      stableLine = !/[<`~]/.test(text.slice(cachedLineStart, cachedLineEnd));
+    }
+    let flags = stableLine ? cachedContext : null;
+    if (!flags) {
+      const context = stripMarkdownContainers(text.slice(0, index));
+      const indentation = context.slice(context.lastIndexOf("\n") + 1).match(/^[ \t]*/)[0];
+      flags = { raw: isRawHtmlRowContext(text, index, true), literal: indentation.includes("\t") || indentation.length >= 4 || isProtocolCodeExample(context, context.length) };
+      if (stableLine) cachedContext = flags;
+    }
+    return (/[\[*_~]/.test(bracket) && flags.raw) ||
+      spans.some(([start, end]) => index >= start && index < end) || flags.literal
+      ? "&#" + bracket.codePointAt(0) + ";" : bracket;
   });
 }
 
@@ -312,10 +327,11 @@ function visibleFootnoteBodies(text) {
 
 function visibleMarkdownLinkLabels(text, projectFootnotes = true) {
   text = text.replace(/\r\n?/g, "\n");
+  if (!text.includes("]")) return text;
   if (projectFootnotes) text = visibleFootnoteBodies(text);
   let result = "";
   let consumed = 0;
-  for (const match of text.matchAll(/\[((?:\\.|[^\]\\])*)\]\(/g)) {
+  for (const match of (text.includes("](") ? text.matchAll(/\[((?:\\.|[^\]\\])*)\]\(/g) : [])) {
     if (match.index < consumed || isEscapedMarkdownStart(text, match.index) || !isVisibleLinkLabel(match[1])) continue;
     let depth = 1;
     let cursor = match.index + match[0].length;
@@ -340,6 +356,7 @@ function visibleMarkdownLinkLabels(text, projectFootnotes = true) {
     }
   }
   const projected = (result + text.slice(consumed)).replace(definitionPattern, (source) => definitionBodies.has(source) ? "" : source);
+  if (definitions.size === 0) return projected;
   const references = projected.replace(/\[([^\]]*)\]\[([^\]]*)\]/g, (source, label, reference, offset, whole) => !isEscapedMarkdownStart(whole, offset) && isVisibleLinkLabel(label) && isVisibleLinkLabel(reference || label, true) && definitions.has(caseFoldLabel((reference || label).trim().replace(/\s+/g, " "))) ? label : source);
   return references.replace(/\[([^\]]+)\](?![\[(])/g, (source, label, offset, whole) => !isEscapedMarkdownStart(whole, offset) && isVisibleLinkLabel(label, true) && definitions.has(caseFoldLabel(label.trim().replace(/\s+/g, " "))) ? label : source);
 }
@@ -777,17 +794,21 @@ function visibleCodexReviewText(value, blockBoundaries = false) {
   }).join(" ").replace(/[^\S\n]+/g, " ").replace(/\n(?: *\n)+/g, "\n\n").replace(/(?<!\n)\n(?!\n)/g, " ");
 }
 
+function maskAbsentFindingStates(text) {
+  return text.replace(/\b(?:no|zero|0) +(?:(?:code|security|blocking|critical|high|medium|low|major|minor|unresolved|open|new|resolved|fixed|addressed|cleared|removed|closed|eliminated) +)*(?:issues?|findings?|problems?|bugs?|flaws?|defects?|regressions?|vulnerabilit(?:y|ies)) +(?:(?:is|are|was|were|remain|remains|remained) +)*(?:pending|unresolved)\b/giu, match => " ".repeat(match.length));
+}
+
 function hasPositiveFindingStatement(text) {
   const cardinal = "(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:[ -](?:one|two|three|four|five|six|seven|eight|nine))?)";
   const paragraphs = String(text).replace(/\r\n/g, "\n").split(/[\r\n][ \t\f\v]*[\r\n]/);
   return paragraphs.some((paragraph) => paragraph.replace(/[ \t\r\n\f\v]+/g, " ")
-    .replace(new RegExp("\\b(?:no|zero) +(?:issues?|findings?|problems?|bugs?|flaws?|vulnerabilit(?:y|ies))[^.!?;]*?\\bexcept +((?:[1-9][0-9]*|some|several|multiple|" + cardinal + "))\\b([^.!?;]*)", "giu"), (match, count, suffix) => match + "; " + count + " findings" + (suffix.trim() ? suffix.replace(/^ *, */, " ") : " remain"))
-    .replace(/\b(no|zero) +((?:issues?|findings?|problems?|bugs?|flaws?|vulnerabilit(?:y|ies))) +(?:and|or) +(?:issues?|findings?|problems?|bugs?|flaws?|vulnerabilit(?:y|ies))\b/giu, "$1 $2")
-    .replace(/\b(no|zero) +(?:(?!(?:issues?|findings?|problems?|bugs?|flaws?|vulnerabilit(?:y|ies)|is|are|was|were|has|have|been|get|gets|got|a|an|one|some|several|multiple)\b)[\p{L}-]+ +)+(?:and|or) +(?:(?!(?:issues?|findings?|problems?|bugs?|flaws?|vulnerabilit(?:y|ies)|is|are|was|were|has|have|been|get|gets|got|a|an|one|some|several|multiple)\b)[\p{L}-]+ +)*((?:issues?|findings?|problems?|bugs?|flaws?|vulnerabilit(?:y|ies))\b)/giu, "$1 $2")
+    .replace(new RegExp("\\b(?:no|zero) +(?:issues?|findings?|problems?|bugs?|flaws?|defects?|regressions?|vulnerabilit(?:y|ies)|security +risks?)[^.!?;]*?\\bexcept +((?:[1-9][0-9]*|some|several|multiple|" + cardinal + "))\\b([^.!?;]*)", "giu"), (match, count, suffix) => match + "; " + count + " findings" + (suffix.trim() ? suffix.replace(/^ *, */, " ") : " remain"))
+    .replace(/\b(no|zero) +((?:issues?|findings?|problems?|bugs?|flaws?|defects?|regressions?|vulnerabilit(?:y|ies)|security +risks?)) +(?:and|or) +(?:issues?|findings?|problems?|bugs?|flaws?|defects?|regressions?|vulnerabilit(?:y|ies)|security +risks?)\b/giu, "$1 $2")
+    .replace(/\b(no|zero) +(?:(?!(?:issues?|findings?|problems?|bugs?|flaws?|defects?|regressions?|vulnerabilit(?:y|ies)|security +risks?|is|are|was|were|has|have|been|get|gets|got|a|an|one|some|several|multiple)\b)[\p{L}-]+ +)+(?:and|or) +(?:(?!(?:issues?|findings?|problems?|bugs?|flaws?|defects?|regressions?|vulnerabilit(?:y|ies)|security +risks?|is|are|was|were|has|have|been|get|gets|got|a|an|one|some|several|multiple)\b)[\p{L}-]+ +)*((?:issues?|findings?|problems?|bugs?|flaws?|defects?|regressions?|vulnerabilit(?:y|ies)|security +risks?)\b)/giu, "$1 $2")
     .split(/[.!?;]|(?<![0-9]),|,(?![0-9])|\b(?:and|or|but|however|yet)\b/i).some((clause) => {
       // Negating a resolution preserves the finding, unlike negating its noun.
       clause = clause.replace(/\b(?:not|never) +(?:(?:be|been|being|get|gets|got|gotten|getting) +)*(?:resolved|fixed|addressed|cleared|removed|closed|eliminated)\b|\b(?:is|are|was|were|has|have|had)n['’]t +(?:(?:be|been|being|get|gets|got|gotten|getting) +)*(?:resolved|fixed|addressed|cleared|removed|closed|eliminated)\b/gi, " unresolved ");
-      const noun = "(?<![\\p{L}\\p{N}_\\p{Pd}])(?:issues?|findings?|problems?|bugs?|flaws?|vulnerabilit(?:y|ies))(?![\\p{L}\\p{N}_\\p{Pd}])";
+      const noun = "(?<![\\p{L}\\p{N}_\\p{Pd}])(?:issues?|findings?|problems?|bugs?|flaws?|defects?|regressions?|vulnerabilit(?:y|ies)|security +risks?)(?![\\p{L}\\p{N}_\\p{Pd}])(?! +(?:tests?|reports?)\\b)";
       const headingNoun = noun.replace("(?![\\p{L}\\p{N}_\\p{Pd}])", "(?![\\p{L}\\p{N}_-])");
       const isAffirmative = (match, counted = false) => {
         const before = clause.slice(0, match.index);
@@ -799,10 +820,17 @@ function hasPositiveFindingStatement(text) {
         const matchedNoun = [...match[0].matchAll(new RegExp(noun, "giu"))].at(-1);
         const predicate = matchedNoun ? match[0].slice(matchedNoun.index + matchedNoun[0].length) : match[0];
         const modifiers = matchedNoun ? match[0].slice(0, matchedNoun.index) : "";
-        if (/\b(?:resolved|fixed|addressed|cleared|removed|closed|eliminated)\b/i.test(modifiers) && !/^ +(?:(?:is|are|was|were|has|have|had|be|been|being|get|gets|got|gotten|getting) +)*(?:(?:can|could|may|might|will|would|must|should) +(?:reappear|recur)|found +again|(?:still +)?(?:persists?|remains?|exists?))\b/iu.test(predicate + after)) return false;
-        if (/\b(?:resolved|fixed|addressed|cleared|removed|closed|eliminated|harmless|benign)\b/i.test(predicate)) return false;
-        if (/^(?: +| *(?::|[–—-]) *)(?:(?:that|which) +)?(?:(?:is|are|was|were|has|have|had|be|been|being|get|gets|got|gotten|getting|now) +)*(?:resolved|fixed|addressed|cleared|removed|closed|eliminated)\b/i.test(after)) return false;
-        return true;
+        const tail = predicate + after;
+        // Absence/resolution is evidence only for an unqualified completed assertion.
+        if (/^ +(?:do|does|did) +not +(?:exist|exists|remain|remains) *$/iu.test(tail)) return false;
+        if (/\b(?:resolved|fixed|addressed|cleared|removed|closed|eliminated) +$/iu.test(before)) return false;
+        const recurrence = /\b(?:reappears?|reappeared|recurs?|recurred|reopens?|reopened|found +again|(?:still +)?(?:persists?|remains?|exists?))\b/iu.test(tail) && !/\b(?:not|never) +(?:reappear|reappeared|recur|recurred|reopen|reopened|persist|remain|exist)\b/iu.test(tail);
+        if (/\b(?:resolves|fixes|addresses|clears|removes|closes|eliminates) +(?:a|an) +/iu.test(modifiers) && !recurrence) return false;
+        const obligation = /\b(?:can|could|may|might|will|would|must|should) +(?:(?:be|been|being|get|gets|got) +)*(?:resolved|fixed|addressed|cleared|removed|closed|eliminated)\b/iu.test(tail);
+        if (obligation) return true;
+        if (/\b(?:resolved|fixed|addressed|cleared|removed|closed|eliminated)\b/i.test(modifiers) && !recurrence && !/^ +(?:(?:is|are|was|were|has|have|had|be|been|being|get|gets|got|gotten|getting) +)*(?:can|could|may|might|will|would|must|should) +(?:reappear|recur|reopen)\b/iu.test(tail)) return false;
+        if (/^(?: +| *(?::|[–—-]) *)(?:(?:that|which) +)?(?:(?:is|are|was|were|has|have|had|be|been|being|get|gets|got|gotten|getting|now|already) +)*(?:resolved|fixed|addressed|cleared|removed|closed|eliminated|harmless|benign) *$/iu.test(tail)) return false;
+          return true;
       };
       const counts = [...clause.matchAll(new RegExp("(?<![\\p{L}\\p{N}_])[*_~`]*([0-9]+(?:,[0-9]{3})*)[*_~`]* +(?:[\\p{L}-]+ +)*?" + noun, "giu"))];
       if (counts.some((match) => !/^0+$/.test(match[1].replaceAll(",", "")) && isAffirmative(match, true))) return true;
@@ -810,17 +838,20 @@ function hasPositiveFindingStatement(text) {
       const cardinalPattern = "\\b" + cardinal + " +(?:[\\p{L}-]+ +)*?" + noun;
       if ([...reporting.matchAll(new RegExp(cardinalPattern, "giu"))].some((match) => isAffirmative(match, true))) return true;
       const patterns = [
+        "\\b(?:most|every|numerous) +(?:[\\p{L}-]+ +)*?" + noun + " +(?:(?:is|are|was|were|has|have|had|be|been|being|get|gets|got|gotten|getting|still) +)*(?:found|[\\p{L}]+ed|remains?|exists?)\\b",
+          "(?<![\\p{L}\\p{N}_] )\\b(?:the +)?(?:(?:critical|security|authentication|code|blocking|high|medium|low|major|minor|unresolved|open|new) +)+" + noun + " +(?:(?:is|are|was|were|has|have|had|be|been|being|get|gets|got|gotten|getting|still) +)*(?:(?:is|are|was|were) +[\\p{L}]+|found|[\\p{L}]+ed|[\\p{L}]+s|remains?|exists?)\\b",
         "\\b(?:a|an) +(?:[\\p{L}-]+ +)*?" + noun + " +(?:(?:can|could|may|might|will|would|must|should) +[\\p{L}-]+|[\\p{L}]+s)\\b",
         "\\bthe +" + noun + " +(?:(?:is|are|was|were) +[\\p{L}-]+|(?:can|could|may|might|will|would|must|should) +[\\p{L}-]+|[\\p{L}]+s)\\b",
         "\\b(?:this|that|these|those) +(?:(?:code|security|blocking|critical|high|medium|low|major|minor|unresolved|open|new|resolved|fixed|addressed|cleared|removed|closed|eliminated) +)*" + noun + " +(?:(?:is|are|was|were) +[\\p{L}-]+|[\\p{L}]+s)\\b",
         "\\b(?:this|that|these|those) +(?:is|are|was|were) +(?:a|an) +(?:[\\p{L}-]+ +)*?" + noun,
         "(?<![\\p{L}\\p{N}_] )\\b(?:(?:a|an|one|some|several|multiple) +)?(?:(?!(?:the|this|that|these|those)\\b)[\\p{L}-]+ +)*?" + headingNoun + "(?= *(?::|[–—-]) *[^ \\t])",
         "\\b(?:found|[\\p{L}]+ed) +(?:[\\p{L}-]+ +)*?" + noun,
+        "\\b[\\p{L}]+s +(?:a|an) +(?:[\\p{L}-]+ +)*?" + noun,
         "(?:\\b(?:a|an|one|some|several|multiple|[0-9]+) +(?:[\\p{L}-]+ +)*?" + noun + "|\\bthe +" + noun + "|(?<![\\p{L}\\p{N}_] )" + noun + ")" + " +(?:(?:is|are|was|were|has|have|had|be|been|being|get|gets|got|gotten|getting|still) +)*(?:found|[\\p{L}]+ed|remains?|exists?)\\b",
         "\\bthere +(?:still +)?(?:is|are) +(?:[\\p{L}-]+ +)*?" + noun,
         "\\b(?:a|an) +(?:[\\p{L}-]+ +)*?" + noun + " +(?:(?:is|are|was|were) +[\\p{L}-]+|(?!(?:is|was|has)\\b)[\\p{L}]+s)\\b",
         "\\b(?:this|that|these|those) +" + noun + " +(?:(?:is|are|was|were) +[\\p{L}-]+|(?!(?:is|was|has)\\b)[\\p{L}]+s)\\b",
-        "(?:\\b(?:both|many|all) +|(?<![\\p{L}\\p{N}_] ))(?:issues|findings|problems|bugs|flaws|vulnerabilities)\\b +(?:(?:is|are|was|were) +[\\p{L}-]+|(?!(?:is|was|has)\\b)[\\p{L}]+)\\b"
+        "(?:\\b(?:both|many|all) +|(?<![\\p{L}\\p{N}_] ))(?:issues|findings|problems|bugs|flaws|defects|regressions|vulnerabilities|security +risks)\\b +(?:(?:is|are|was|were) +[\\p{L}-]+|(?!(?:is|was|has)\\b)[\\p{L}]+)\\b"
       ];
       return patterns.some((pattern) => [...reporting.matchAll(new RegExp(pattern, "giu"))].some((match) => isAffirmative(match)));
     }));
@@ -828,7 +859,8 @@ function hasPositiveFindingStatement(text) {
 
 function hasContradictoryCodexPresentation(body) {
   const visible = visibleCodexReviewText(body, true);
-  return hasPositiveFindingStatement(visible) || /\b(?:unresolved|failed|failure|running|pending|cancelled|incomplete|in.progress|not.completed|changes.requested|security.concerns?|do.not.merge|P[0-2])\b/i.test(visible);
+  const stateVisible = maskAbsentFindingStates(visible) + "\n" + String(body || "").split(/\r?\n/).filter((line) => line.includes("|")).map((line) => visibleCodexReviewText(line, true)).join("\n");
+  return hasPositiveFindingStatement(visible) || /\b(?:unresolved|failed|failure|running|pending|cancelled|incomplete|in.progress|not.completed|changes.requested|security.concerns?|do.not.merge|P[0-2])\b/i.test(stateVisible);
 }
 
 function hasRenderedCodexSectionRow(body, label) {
@@ -976,6 +1008,15 @@ function isRawHtmlRowContext(body, index, markdownOnly = false) {
   return Boolean(until || untilBlank || (!markdownOnly && containers.length));
 }
 
+// Completion cannot predate the comment that carries it. GitHub timestamps
+// have second precision while rendered completion rows may include fractions.
+function completionWithinComment(comment, completed) {
+  const created = Date.parse(comment.created_at || "");
+  const observed = Date.parse(comment.updated_at || comment.created_at || "");
+  return Number.isFinite(completed) && Number.isFinite(created) && Number.isFinite(observed) &&
+    Math.floor(completed / 1000) >= Math.floor(created / 1000) && completed <= observed + 999;
+}
+
 function codeReviewCompletedAt(body, headSha, section = "code_review") {
   const renderedLabel = section === "security_review" ? "Security Review" : "Code Review";
   if (String(body).split("\n").filter((line) => hasRenderedCodexSectionRow(line, renderedLabel)).length !== 1) return NaN;
@@ -1037,7 +1078,7 @@ export function isAffirmativeCodexReviewState(comment, headSha, requestedAt, req
   const observed = Date.parse(comment.updated_at || comment.created_at || "");
   const requested = Date.parse(requestedAt || "");
   const completed = codeReviewCompletedAt(body, headSha);
-  if (!Number.isFinite(completed) || Math.floor(completed / 1000) <= Math.floor(requested / 1000) || completed >= observed + 1000 ||
+  if (!Number.isFinite(completed) || Math.floor(completed / 1000) <= Math.floor(requested / 1000) || !completionWithinComment(comment, completed) ||
       !Number.isFinite(observed) || !Number.isFinite(requested) ||
       !(observed > requested || (observed === requested && compareNumericIds(comment.id, requestCommentId) > 0))) return false;
   try {
@@ -1054,7 +1095,9 @@ export function isAffirmativeCodexReviewState(comment, headSha, requestedAt, req
     const complete = (value) => closed(value) && value.commit_sha === headSha && value.status === "completed" &&
       value.has_any_findings === false && value.has_unresolved_findings === false;
     const absent = (value) => closed(value) && Object.values(value).every((entry) => entry === null);
-    return complete(state.code_review) && ((absent(state.security_review) && !hasRenderedCodexSectionRow(body, "Security Review")) || complete(state.security_review));
+    const securityCompleted = codeReviewCompletedAt(body, headSha, "security_review");
+    return complete(state.code_review) && ((absent(state.security_review) && !hasRenderedCodexSectionRow(body, "Security Review")) ||
+      (complete(state.security_review) && Number.isFinite(securityCompleted) && securityCompleted <= observed + 999));
   } catch { return false; }
 }
 
@@ -1160,7 +1203,7 @@ function findingCompletedAt(comment, section, headSha) {
   if (hasContradictoryCodexPresentation(presentation)) return observed;
   if (state?.[other].status === null && hasRenderedCodexSectionRow(comment.body, label)) return observed;
   const completed = codeReviewCompletedAt(String(comment.body || ""), headSha, section);
-  return Number.isFinite(completed) && completed <= observed + 999 ? completed : observed;
+  return completionWithinComment(comment, completed) ? completed : observed;
 }
 
 function latestCodexCommentResult(comments, headSha, requestedAt, requestCommentId, nativeCompletedAt = NaN) {
@@ -1218,7 +1261,7 @@ function latestCodexCommentResult(comments, headSha, requestedAt, requestComment
   }).map((comment) => {
     const completed = codeReviewCompletedAt(String(comment.body || ""), headSha, section);
     const observed = Date.parse(comment.updated_at || comment.created_at || "");
-    return Number.isFinite(completed) && completed <= observed + 999 ? Math.floor(completed / 1000) : -Infinity;
+    return completionWithinComment(comment, completed) ? Math.floor(completed / 1000) : -Infinity;
   }));
   const historical = signals.filter((comment) => {
     const state = typedCodexReviewState(comment, { negativeOnly: true });
