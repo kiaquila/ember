@@ -83,19 +83,56 @@ function isEscapedMarkdownStart(text, index) {
 
 // Code contexts display link syntax literally; protect their opening bracket
 // until visible entities are decoded, after all Markdown transformations.
+function indentationColumns(prefix) {
+  return Array.from(prefix).reduce((column, character) => column + (character === "\t" ? 4 - column % 4 : 1), 0);
+}
+
+
+function consumeIndentationColumns(line, required) {
+  let column = 0, index = 0;
+  while (column < required && /[ \t]/.test(line[index] || "x")) {
+    column += line[index++] === "\t" ? 4 - column % 4 : 1;
+  }
+  return column < required ? null : " ".repeat(column - required) + line.slice(index);
+}
+
+// HTML tokenizer comment endings, including abrupt empty-comment closure.
+
+function markdownContainerContext(line) {
+  const frames = [];
+  while (true) {
+    const quote = line.match(/^ {0,3}>[ \t]?/);
+    if (quote) { frames.push({ kind: "quote" }); line = line.slice(quote[0].length); continue; }
+    const list = line.match(/^ {0,3}(?:[-+*]|[0-9]{1,9}[.)])[ \t]+/);
+    if (list) { frames.push({ kind: "list", width: indentationColumns(list[0]) }); line = line.slice(list[0].length); continue; }
+    return { content: line, frames };
+  }
+}
+
+
+function markdownContainerContinuation(line, frames) {
+  for (const frame of frames) {
+    if (frame.kind === "list") {
+      line = consumeIndentationColumns(line, frame.width);
+      if (line === null) return null;
+    } else {
+      const prefix = line.match(/^ {0,3}>[ \t]?/);
+      if (!prefix) return null;
+      line = line.slice(prefix[0].length);
+    }
+  }
+  return line;
+}
+
+
 function stripMarkdownContainers(text, preserveBoundaries = false) {
-  let previousQuotes = 0;
+  let previousFrames = [];
   return text.split("\n").map((line) => {
-      let previous;
-      let quotes = 0;
-      do {
-        previous = line;
-        if (/^ {0,3}>/.test(line)) quotes += 1;
-        line = line.replace(/^ {0,3}>[ \t]?/, "").replace(/^ {0,3}(?:[-+*]|[0-9]{1,9}[.)])[ \t]/, "");
-      } while (line !== previous);
-      const boundary = preserveBoundaries && quotes < previousQuotes ? "\n" : "";
-      previousQuotes = quotes;
-      return boundary + line;
+    const context = markdownContainerContext(line);
+    const continuation = markdownContainerContinuation(line, previousFrames);
+    const boundary = preserveBoundaries && previousFrames.length && continuation === null ? "\n" : "";
+    previousFrames = context.frames.length ? context.frames : continuation === null ? [] : previousFrames;
+    return boundary + context.content;
   }).join("\n");
 }
 
@@ -377,7 +414,7 @@ const HTML_ENTITY_NAMES = new Set([
 const legacyHtmlNames = Object.keys(LEGACY_HTML_NAMES).sort((a, b) => b.length - a.length);
 
 // Normalize only human-visible negative evidence; protocol and clocks stay raw.
-function visibleCodexReviewText(value) {
+function visibleCodexReviewText(value, blockBoundaries = false) {
   // Parse raw structural delimiters before decoding text entities: an encoded
   // quote is attribute data, and an encoded angle bracket cannot create a tag.
   const raw = withoutHtmlComments(String(value || ""));
@@ -400,7 +437,10 @@ function visibleCodexReviewText(value) {
     return point > 0 && point <= 0x10ffff && !(point >= 0xd800 && point <= 0xdfff) ? String.fromCodePoint(point) : entity;
   }).replace(/&([A-Za-z][A-Za-z0-9]*);/g, (entity, name) => Object.hasOwn(HTML_SPACING_ENTITIES, name) ? HTML_SPACING_ENTITIES[name] : entity);
   return ["", " "].flatMap((separator) => {
-    const visible = decode(activeMarkdownEmphasis(visibleMarkdownLinkLabels(images.replace(/<\/?[A-Za-z][A-Za-z0-9-]*(?:[^"'<>]|"[^"]*"|'[^']*')*>/g, (tag, offset) => validTag.test(tag) || isRawHtmlRowContext(images, offset, true) ? separator : tag))));
+    const visible = decode(activeMarkdownEmphasis(visibleMarkdownLinkLabels(images.replace(/<\/?[A-Za-z][A-Za-z0-9-]*(?:[^"'<>]|"[^"]*"|'[^']*')*>/g, (tag, offset) => {
+      if (!validTag.test(tag) && !isRawHtmlRowContext(images, offset, true)) return tag;
+      return blockBoundaries && /^<\/?(?:address|article|aside|blockquote|dd|details|dialog|div|dl|dt|fieldset|figcaption|figure|footer|form|h[1-6]|header|hr|li|main|menu|nav|ol|p|pre|section|summary|table|tbody|td|tfoot|th|thead|tr|ul|br)(?:\s|\/?>)/i.test(tag) ? "\n\n" : separator;
+    }))));
     return [visible.replace(/\p{Default_Ignorable_Code_Point}/gu, ""), visible.replace(/\p{Default_Ignorable_Code_Point}/gu, " ")];
   }).join(" ").replace(/[^\S\n]+/g, " ").replace(/\n(?: *\n)+/g, "\n\n").replace(/(?<!\n)\n(?!\n)/g, " ");
 }
@@ -408,34 +448,42 @@ function visibleCodexReviewText(value) {
 function hasPositiveFindingStatement(text) {
   const paragraphs = String(text).replace(/\r\n/g, "\n").split(/[\r\n][ \t\f\v]*[\r\n]/);
   return paragraphs.some((paragraph) => paragraph.replace(/[ \t\r\n\f\v]+/g, " ")
+    .replace(/\b(no|zero) +((?:issues?|findings?|problems?|bugs?|vulnerabilit(?:y|ies))) +(?:and|or) +(?:issues?|findings?|problems?|bugs?|vulnerabilit(?:y|ies))\b/giu, "$1 $2")
+    .replace(/\b(no|zero) +(?:(?!(?:issues?|findings?|problems?|bugs?|vulnerabilit(?:y|ies)|is|are|was|were|has|have|been|get|gets|got|a|an|one|some|several|multiple)\b)[\p{L}-]+ +)+(?:and|or) +(?:(?!(?:issues?|findings?|problems?|bugs?|vulnerabilit(?:y|ies)|is|are|was|were|has|have|been|get|gets|got|a|an|one|some|several|multiple)\b)[\p{L}-]+ +)*((?:issues?|findings?|problems?|bugs?|vulnerabilit(?:y|ies))\b)/giu, "$1 $2")
     .split(/[.!?;]|(?<![0-9]),|,(?![0-9])|\b(?:and|or|but|however|yet)\b/i).some((clause) => {
       // Negating a resolution preserves the finding, unlike negating its noun.
-      clause = clause.replace(/\b(?:not|never) +(?:been +)?(?:resolved|fixed|addressed|cleared|removed|closed)\b|\b(?:is|are|was|were|has|have)n['’]t +(?:been +)?(?:resolved|fixed|addressed|cleared|removed|closed)\b/gi, " unresolved ");
-      const noun = "(?<![\\p{L}\\p{N}_\\p{Pd}])(?:issues?|findings?|problems?|bugs?)(?![\\p{L}\\p{N}_\\p{Pd}])";
-      const isAffirmative = (match) => {
+      clause = clause.replace(/\b(?:not|never) +(?:(?:be|been|being|get|gets|got|gotten|getting) +)*(?:resolved|fixed|addressed|cleared|removed|closed|eliminated)\b|\b(?:is|are|was|were|has|have|had)n['’]t +(?:(?:be|been|being|get|gets|got|gotten|getting) +)*(?:resolved|fixed|addressed|cleared|removed|closed|eliminated)\b/gi, " unresolved ");
+      const noun = "(?<![\\p{L}\\p{N}_\\p{Pd}])(?:issues?|findings?|problems?|bugs?|vulnerabilit(?:y|ies))(?![\\p{L}\\p{N}_\\p{Pd}])";
+      const headingNoun = noun.replace("(?![\\p{L}\\p{N}_\\p{Pd}])", "(?![\\p{L}\\p{N}_-])");
+      const isAffirmative = (match, counted = false) => {
         const before = clause.slice(0, match.index);
         const after = clause.slice(match.index + match[0].length);
+        if (!counted && /^ *(?::|[–—-]) *(?:no|none|zero|0+(?:,000)*) *$/iu.test(after)) return false;
         // Scope negation to this construction, not an unrelated earlier clause.
         if (/\b(?:no|zero|not|without|never|cannot)\b|\b[\p{L}]+n['’]t\b/iu.test(match[0])) return false;
-        if (/(?:\b(?:no|zero|not|without|never|cannot)|\b[\p{L}]+n['’]t)(?: +(?:be|been|being|considered))* +$/iu.test(before)) return false;
-        if (/\b(?:resolved|fixed|addressed|cleared|removed|closed)\b/i.test(match[0])) return false;
-        if (/^ +(?:(?:is|are|was|were|has|have|been|now) +)*(?:resolved|fixed|addressed|cleared|removed|closed)\b/i.test(after)) return false;
+        if (/(?:\b(?:no|zero|not|without|never|cannot)|\b[\p{L}]+n['’]t)(?: +(?:be|been|being|get|gets|got|gotten|getting|considered))* +$/iu.test(before)) return false;
+        if (/\b(?:resolved|fixed|addressed|cleared|removed|closed|eliminated)\b/i.test(match[0])) return false;
+        if (/^(?: +| *(?::|[–—-]) *)(?:(?:that|which) +)?(?:(?:is|are|was|were|has|have|had|be|been|being|get|gets|got|gotten|getting|now) +)*(?:resolved|fixed|addressed|cleared|removed|closed|eliminated)\b/i.test(after)) return false;
         return true;
       };
       const counts = [...clause.matchAll(new RegExp("(?<![\\p{L}\\p{N}_])[*_~`]*([0-9]+(?:,[0-9]{3})*)[*_~`]* +(?:[\\p{L}-]+ +)*?" + noun, "giu"))];
-      if (counts.some((match) => !/^0+$/.test(match[1].replaceAll(",", "")) && isAffirmative(match))) return true;
+      if (counts.some((match) => !/^0+$/.test(match[1].replaceAll(",", "")) && isAffirmative(match, true))) return true;
       const reporting = clause.replace(new RegExp("(?<![\\p{L}\\p{N}_])[*_~`]*0+(?:,000)*[*_~`]* +(?:[\\p{L}-]+ +)*?" + noun, "giu"), (match) => " ".repeat(match.length));
       const patterns = [
+        "(?<![\\p{L}\\p{N}_] )\\b(?:(?:a|an|one|some|several|multiple) +)?(?:(?!(?:the|this|that|these|those)\\b)[\\p{L}-]+ +)*?" + headingNoun + "(?= *(?::|[–—-]) *[^ \\t])",
         "\\b(?:found|[\\p{L}]+ed) +(?:[\\p{L}-]+ +)*?" + noun,
-        "(?:(?:a|an|one|some|several|multiple|[0-9]+) +)?" + noun + " +(?:(?:is|are|was|were|has|have|been) +)*(?:found|[\\p{L}]+ed|remains?|exists?)\\b",
-        "\\bthere +(?:is|are) +(?:[\\p{L}-]+ +)*?" + noun
+        "(?:\\b(?:a|an|one|some|several|multiple|[0-9]+) +(?:[\\p{L}-]+ +)*?" + noun + "|\\bthe +" + noun + "|(?<![\\p{L}\\p{N}_] )" + noun + ")" + " +(?:(?:is|are|was|were|has|have|had|be|been|being|get|gets|got|gotten|getting) +)*(?:found|[\\p{L}]+ed|remains?|exists?)\\b",
+        "\\bthere +(?:is|are) +(?:[\\p{L}-]+ +)*?" + noun,
+        "\\b(?:a|an) +(?:[\\p{L}-]+ +)*?" + noun + " +(?:(?:is|are|was|were) +[\\p{L}-]+|(?!(?:is|was|has)\\b)[\\p{L}]+s)\\b",
+        "\\b(?:this|that|these|those) +" + noun + " +(?:(?:is|are|was|were) +[\\p{L}-]+|(?!(?:is|was|has)\\b)[\\p{L}]+s)\\b",
+        "(?<![\\p{L}\\p{N}_] )(?:issues|findings|problems|bugs|vulnerabilities)\\b +(?:(?:is|are|was|were) +[\\p{L}-]+|(?!(?:is|was|has)\\b)[\\p{L}]+)\\b"
       ];
-      return patterns.some((pattern) => [...reporting.matchAll(new RegExp(pattern, "giu"))].some(isAffirmative));
+      return patterns.some((pattern) => [...reporting.matchAll(new RegExp(pattern, "giu"))].some((match) => isAffirmative(match)));
     }));
 }
 
 function hasContradictoryCodexPresentation(body) {
-  const visible = visibleCodexReviewText(body);
+  const visible = visibleCodexReviewText(body, true);
   return hasPositiveFindingStatement(visible) || /\b(?:unresolved|failed|failure|running|pending|cancelled|incomplete|in.progress|not.completed|changes.requested|security.concerns?|do.not.merge|P[0-2])\b/i.test(visible);
 }
 
@@ -719,6 +767,10 @@ function isSectionClearingState(comment, section, headSha) {
   const other = section === "code_review" ? "Security Review" : "Code Review";
   const otherSection = section === "code_review" ? "security_review" : "code_review";
   const otherPrefix = "| " + (other === "Code Review" ? "📝" : "🛡️") + " **" + other + "** | ";
+  if (state[otherSection].status === "completed" && state[otherSection].has_any_findings === false && state[otherSection].has_unresolved_findings === false) {
+    const companion = body.split("\n").find((line) => line.startsWith(otherPrefix));
+    if (hasContradictoryCodexPresentation(companion || "")) return false;
+  }
   // Only a unique validated completed counterpart row scopes its severity.
   // Global prose and unvalidated rows remain ambiguous vetoes.
   const severityBody = state[otherSection].status === "completed"
@@ -753,7 +805,12 @@ function findingCompletedAt(comment, section, headSha) {
     const otherCompleted = codeReviewCompletedAt(presentation, state[other].commit_sha, other);
     if (Number.isFinite(otherCompleted) && otherCompleted <= observed + 999) {
       const prefix = "| " + (other === "code_review" ? "📝" : "🛡️") + " **" + label + "** | ";
-      presentation = presentation.split("\n").filter((line) => !line.startsWith(prefix)).join("\n");
+      const rows = presentation.split("\n");
+      const companion = rows.find((line) => line.startsWith(prefix));
+      const reportsFinding = state[other].has_any_findings === true || state[other].has_unresolved_findings === true;
+      if (reportsFinding || !hasContradictoryCodexPresentation(companion || "")) {
+        presentation = rows.filter((line) => !line.startsWith(prefix)).join("\n");
+      }
     }
   }
   if (hasContradictoryCodexPresentation(presentation)) return observed;
