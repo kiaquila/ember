@@ -1164,6 +1164,13 @@ function findingCompletedAt(comment, section, headSha) {
   const observed = Date.parse(comment.updated_at || comment.created_at || "");
   const state = typedCodexReviewState(comment, { negativeOnly: true });
   if (!isCanonicalCodexPresentation(comment.body, state)) return observed;
+  // A carried companion may predate this comment, but cannot complete after
+  // its server observation. A future companion invalidates backdating only.
+  const companion = section === "code_review" ? "security_review" : "code_review";
+  if (state[companion].status === "completed") {
+    const completed = codeReviewCompletedAt(String(comment.body || ""), state[companion].commit_sha, companion);
+    if (!Number.isFinite(completed) || !Number.isFinite(observed) || completed >= observed + 1000) return observed;
+  }
   const label = section === "code_review" ? "Code Review" : "Security Review";
   const ownRow = String(comment.body).split("\n").find(line => line.includes("**" + label + "**"));
   if (!/\| (?:Manual request|PR opened) \|$/.test(ownRow || "")) return observed;

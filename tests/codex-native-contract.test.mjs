@@ -69,3 +69,33 @@ test("both native security icons preserve independent section clearance", () => 
     }
   }
 });
+
+test("future completed companions retain observed negative authority while carried clocks remain valid", () => {
+  const head = "a".repeat(40);
+  const old = "2026-10-20T12:02:00Z", middle = "2026-10-20T12:03:00Z", observed = "2026-10-20T12:04:00Z", fresh = "2026-10-20T12:05:00Z";
+  const requestedAt = "2026-10-20T12:01:00Z";
+  const record = (body, created_at, updated_at = created_at) => ({ user, body, created_at, updated_at });
+  const flags = () => ({ commit_sha: head, has_any_findings: false, has_unresolved_findings: false, status: "completed" });
+  const body = (negativeSection, ownTime, companionTime, companionHead, icon) => {
+    const state = { code_review: flags(), security_review: flags() };
+    if (negativeSection) {
+      state[negativeSection].has_any_findings = true;
+      state[negativeSection === "code_review" ? "security_review" : "code_review"].commit_sha = companionHead;
+    }
+    const row = (section, label, symbol) => {
+      const at = negativeSection && section !== negativeSection ? companionTime : ownTime;
+      return `| ${symbol} **${label}** | ✅ **Completed** <relative-time datetime="${at}">${at}</relative-time> | \`${state[section].commit_sha.slice(0, 7)}\` | Manual request |`;
+    };
+    return "<!-- codex-pull-request-review-summary -->\n<!-- codex-review-state:v1 " + JSON.stringify(state) + " -->\n\n## Codex Review Summary\n\n" + row("code_review", "Code Review", "📝") + "\n" + row("security_review", "Security Review", icon);
+  };
+  const receipt = record("Codex Review: Didn't find any major issues.\n\n**Reviewed commit:** `" + head + "`", observed);
+  const run = comments => evaluateCodexReviewEvidence(evidence(comments, head, requestedAt));
+  for (const section of ["code_review", "security_review"]) for (const companionHead of [head, "b".repeat(40)]) for (const icon of ["🛡️", "🔒"]) {
+    const negative = record(body(section, old, "2026-10-20T12:40:00Z", companionHead, icon), old, observed);
+    const clear = record(body(null, middle, middle, head, icon), middle);
+    assert.equal(run([negative, clear, receipt]), "pending", "future companion cannot backdate " + section + icon + companionHead[0]);
+    assert.equal(run([negative, record(body(null, fresh, fresh, head, icon), fresh)]), "pass", "strictly newer canonical recovery " + section + icon);
+    const carried = record(body(section, old, "2026-10-20T12:01:00Z", companionHead, icon), old, observed);
+    assert.equal(run([carried, clear, receipt]), "pass", "carried companion before comment creation stays valid " + section + icon);
+  }
+});
