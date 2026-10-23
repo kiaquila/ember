@@ -59,6 +59,17 @@ newer affirmative machine completion independently supersedes that unstructured
 text. Later or same-second unfamiliar text requires a fresh completion. The
 legacy receipt parser remains strict and arbitrary prose never grants success.
 
+
+The observed native receipt corpus in `tests/fixtures/native-codex-corpus.json`
+covers 19 sign-offs, ten-character and full-head references, and the exact
+`View task →` link shape. Unknown closings, extra lines, unknown help text,
+foreign task links and mismatched heads cannot approve. A completed native code
+lifecycle with null finding flags is not an affirmative verdict: it may accompany
+an independently valid immutable receipt only when lifecycle creation precedes
+receipt creation, receipt creation does not follow code completion, and that
+completion follows the trusted request. Active security, mixed or true flags,
+unknown presentation, edited receipts and unpaired lifecycles remain pending.
+
 Strict positive receipt freshness and ordering use creation time; an edit cannot
 renew approval or outrank a later pending verdict. Unknown or negative receipt
 edits retain their update time so they can invalidate an older clean completion.
@@ -67,7 +78,7 @@ A trusted exact-head clean formal review can also supersede strictly older
 pending summary evidence. Valid exact-head structured findings survive a repeated request for that head. Earlier valid section-specific clearing proof also remains effective when another section is absent or running, so repeated requests do not resurrect resolved findings; historical proof alone cannot grant the new request approval.
 Code findings require newer affirmative code proof; security findings require
 newer completed false/false security proof for that head (null is insufficient).
-Clearing checks exclude severity only inside the other section’s unique validated completed row; ambiguous global severity remains pending. Typed finding order uses the affected section’s canonical completion time; unrelated summary edits do not renew that finding, while explicit severity or failure presentation uses the update time. Negative facts require a canonical leading summary marker, closed typed state and summary heading, even when visual section rows or clocks are invalid; invalid or ambiguous clocks use the observation time. Trailing presentation, including quoted or fenced examples and extra markers, cannot erase those facts. Whole quoted or fenced envelopes, unknown or duplicate markers inside the leading envelope, malformed schemas and foreign-head state cannot become permanent vetoes. Existing negative-text checks normalize numeric and named-space HTML character references, inline Markdown/HTML presentation and invisible formatting; protocol, JSON, SHA and completion clocks remain validated from raw text. The ignored About footer cannot supply completion-clock evidence. Clearing and approval still validate the entire original body.
+Clearing checks exclude severity only inside the other section’s unique validated completed row; ambiguous global severity remains pending. Typed finding order uses the affected section’s canonical completion time; unrelated summary edits do not renew that finding, while explicit severity or failure presentation uses the update time. Negative facts require a canonical leading summary marker, closed typed state and summary heading, even when visual section rows or clocks are invalid; invalid or ambiguous clocks use the observation time. Trailing presentation, including quoted or fenced examples and extra markers, cannot erase those facts. Whole quoted or fenced envelopes, unknown or duplicate markers inside the leading envelope, malformed schemas and foreign-head state cannot become permanent vetoes. The entire native presentation must match the declared section rows, known triggers, optional native table header and exact known About help text before approval or section-clock authority. The older row-only native layout remains supported. Unknown text, including apparently harmless prose or Markdown examples, stays pending and keeps an explicit typed negative at its observation time. English finding inference is not an authority boundary. Clearing still validates the entire original body.
 Explicit structured code/security findings require newer affirmative structured proof; a formal code review cannot clear them.
 Its submission time uses the same second buckets;
 tied or newer pending comments still block, and malformed receipt envelopes,
@@ -85,7 +96,7 @@ times and subsecond completion rows use second buckets; ambiguous ties stay
 pending. Headings and reactions are not proof. Native P0–P2 findings, unresolved
 threads and malformed receipt envelopes retain their vetoes, including duplicate
 verdict/SHA fields, unknown markers, extra lines and explicit P0–P2 receipt
-findings. Contradictory visible summary status invalidates machine state. Reruns
+findings. Any unrecognized summary presentation invalidates affirmative machine state. Reruns
 wait for active gates and coalesce events already read by a later attempt.
 
 While this contract upgrade is under review, the trusted default-branch gate

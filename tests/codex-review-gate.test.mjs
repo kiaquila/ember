@@ -296,7 +296,7 @@ test("real receipt and legacy answers pass, including native GitHub details", ()
   for (const body of [legacyBody, receiptBody, receiptBody.replace(":rocket:", "Keep it up!"),
     receiptBody.replace(":rocket:", "Hooray!"),
     receiptBody.replace(":rocket:", "More of your lovely PRs please."),
-    `${receiptBody}\n\n<details> <summary>ℹ️ About Codex in GitHub</summary>\n<br/>\n\nReviews are triggered when you comment \"@codex review\".\n</details>`]) {
+    receiptBody + "\n\n" + "<details> <summary>ℹ️ About Codex in GitHub</summary>\n<br/>\n\n[Your team has set up Codex to review pull requests in this repo](https://chatgpt.com/codex/cloud/settings/general). Reviews are triggered when you\n- Open a pull request for review\n- Mark a draft as ready\n- Comment \"@codex review\".\n\nIf Codex has suggestions, it will comment; otherwise it will react with 👍.\n\n\n\n\nCodex can also answer questions or update the PR. Try commenting \"@codex address that feedback\".\n            \n</details>"]) {
     assert.equal(isAcceptableCodexSummaryComment(summaryComment(body), headSha, requestedAt, "10"), true);
     assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, summaryComment(body)] })), "pass");
   }
@@ -306,7 +306,7 @@ test("receipts fail closed on stale, absent, ambiguous or conflicting evidence",
   for (const body of [
     receiptBody.replace(headSha.slice(0, 10), "f".repeat(10)),
     receiptBody.replace(/\*\*Reviewed commit:[\s\S]*/, ""),
-    receiptBody.replace(headSha.slice(0, 10), headSha),
+    receiptBody.replace(headSha.slice(0, 10), "f".repeat(40)),
     receiptBody.replace("receipt:v1", "receipt:v2"),
     receiptBody.replace("<!--", "<!-"),
     `${receiptBody}\n\n${receiptBody}`,
@@ -494,7 +494,7 @@ test("requeue aborts on a new push or closed PR and bounds active-run waiting", 
 test("only newer structured proof supersedes an unfamiliar closing", () => {
   const run = (answers) => evaluateCodexReviewEvidence(evidence({ comments: [command, ...answers] }));
   const state = summaryComment(stateBody);
-  for (const suffix of ["Swish!", "Chef's kiss.", "Chef’s kiss.", "No worries!", "A whimsical flourish.", "Sunshine and confetti! 🎉"]) {
+  for (const suffix of ["A whimsical flourish.", "No worries!", "Sunshine and confetti! 🎉"]) {
     const answer = summaryComment(receiptBody.replace(":rocket:", suffix));
     assert.equal(run([answer]), "pending");
     for (const newerState of [true, false]) {
@@ -504,7 +504,7 @@ test("only newer structured proof supersedes an unfamiliar closing", () => {
 
     }
   }
-  for (const suffix of ["Swish! <!-- unknown -->", "Swish!\nExtra line.", "P0 finding", "P1 finding", "P2 finding"]) {
+  for (const suffix of ["A whimsical flourish. <!-- unknown -->", "A whimsical flourish.\nExtra line.", "P0 finding", "P1 finding", "P2 finding"]) {
     assert.equal(run([state, summaryComment(receiptBody.replace(":rocket:", suffix))]), "pending", suffix);
   }
   for (const bad of [stateBody.replace('"completed"', '"running"'), stateBody.replace('"has_any_findings":false', '"has_any_findings":true'), stateBody.replace('"code_review":', '"code_review":{},"code_review":'), stateBody.replace('"status":"completed"', '"extra":false,"status":"completed"'), stateBody.replace('"status":"completed"', '"status":true'), stateBody.replace('"status":null', '"status":"running"'), stateBody.replace('"commit_sha":null', '"commit_sha":"' + "f".repeat(40) + '"'), stateBody.replace('"code_review":', '"code_review":broken'), stateBody + "\n<!-- codex-review-state:v1 {} -->"]) {
@@ -539,7 +539,7 @@ function runGate(comments, reviews = []) {
 
 test("executed gate requires independent state for unfamiliar closings", () => {
   const state = summaryComment(stateBody);
-  const opaque = summaryComment(receiptBody.replace(":rocket:", "Swish!"));
+  const opaque = summaryComment(receiptBody.replace(":rocket:", "A whimsical flourish."));
   for (const comments of [[state], [opaque, { ...state, body: state.body.replaceAll(answeredAt, "2026-10-15T22:00:00Z"), updated_at: "2026-10-15T22:00:00Z" }]]) {
     const result = runGate(comments);
     assert.equal(result.status, 0, result.stderr);
@@ -596,7 +596,7 @@ test("machine chronology does not interpret arbitrary prose as neutral", () => {
 test("security-only edits cannot renew code completion or supersede later receipts", () => {
   const run = (comments) => evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments] }));
   const state = summaryComment(stateBody);
-  const unknown = { ...summaryComment(receiptBody.replace(":rocket:", "Swish!")), created_at: "2026-10-15T21:30:00Z", updated_at: "2026-10-15T21:30:00Z" };
+  const unknown = { ...summaryComment(receiptBody.replace(":rocket:", "A whimsical flourish.")), created_at: "2026-10-15T21:30:00Z", updated_at: "2026-10-15T21:30:00Z" };
   const securityOnly = { ...state, updated_at: "2026-10-15T22:00:00Z" };
   assert.equal(run([unknown, securityOnly]), "pending");
   const staleCode = { ...securityOnly, body: state.body.replaceAll(answeredAt, "2026-10-15T19:00:00Z") };
@@ -605,7 +605,7 @@ test("security-only edits cannot renew code completion or supersede later receip
   // truncated to seconds. Same-second unknown prose still wins conservatively.
   const fractional = { ...state, body: state.body.replaceAll(answeredAt, answeredAt.replace("Z", ".070069Z")) };
   assert.equal(run([fractional]), "pass");
-  assert.equal(run([fractional, summaryComment(receiptBody.replace(":rocket:", "Swish!"))]), "pending");
+  assert.equal(run([fractional, summaryComment(receiptBody.replace(":rocket:", "A whimsical flourish."))]), "pending");
   const future = { ...state, body: state.body.replaceAll(answeredAt, "2026-10-15T23:00:00Z") };
   assert.equal(run([future]), "pending");
 });
@@ -656,7 +656,7 @@ test("same-second receipts preceding the request cannot veto a fresh answer", ()
 
 
 test("a fresh completion supersedes an eligible pre-request receipt edit", () => {
-  const edited = { ...summaryComment(receiptBody.replace(":rocket:", "Swish!")), created_at: "2026-10-15T19:00:00Z", updated_at: "2026-10-15T21:30:00Z" };
+  const edited = { ...summaryComment(receiptBody.replace(":rocket:", "A whimsical flourish.")), created_at: "2026-10-15T19:00:00Z", updated_at: "2026-10-15T21:30:00Z" };
   const state = { ...summaryComment(stateBody.replaceAll(answeredAt, "2026-10-15T22:00:00Z")), updated_at: "2026-10-15T22:00:00Z" };
   const comments = [edited, state];
   assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments] })), "pass");
@@ -677,7 +677,7 @@ test("a mutable summary edit tied with the request stays pending despite its old
 
 
 test("a later completion supersedes an ambiguous same-second receipt edit", () => {
-  const edited = { ...summaryComment(receiptBody.replace(":rocket:", "Swish!")), id: 9, created_at: "2026-10-15T19:00:00Z", updated_at: requestedAt };
+  const edited = { ...summaryComment(receiptBody.replace(":rocket:", "A whimsical flourish.")), id: 9, created_at: "2026-10-15T19:00:00Z", updated_at: requestedAt };
   const comments = [edited];
   assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments] })), "pending");
   comments.push(summaryComment(stateBody));
@@ -832,7 +832,7 @@ test("same-head repeated requests retain typed findings until matching newer mac
         const other = section === "code_review" ? "security_review" : "code_review";
         state[other] = { commit_sha: status ? state[other].commit_sha : null, has_any_findings: null, has_unresolved_findings: null, status };
         const label = other === "code_review" ? "Code Review" : "Security Review";
-        const partial = { ...priorClean, body: priorClean.body.replace(encoded, JSON.stringify(state)).split("\n").filter((line) => !line.includes("**" + label + "**")).join("\n") };
+        const partial = { ...priorClean, body: priorClean.body.replace(encoded, JSON.stringify(state)).split("\n").flatMap((line) => !line.includes("**" + label + "**") ? [line] : status === "running" ? [line.replace("✅ **Completed**", "🔄 **Running** since")] : []).join("\n") };
         comments.push(partial);
         assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pass", "valid section-specific clearing survives a repeated request");
         assert.equal(runGate([repeated, ...comments], reviews).status, 0);
@@ -844,7 +844,7 @@ test("same-head repeated requests retain typed findings until matching newer mac
           assert.equal(runGate([repeated, ...comments], reviews).status, 1);
           comments.pop();
           const runningRow = priorClean.body.split("\n").find((line) => line.includes("**" + label + "**")).replace("✅ **Completed** ", "🔄 **Running** since ");
-          comments.push({ ...partial, body: partial.body + "\n" + runningRow });
+          comments.push(partial);
           assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pass", "a canonical running companion row preserves independent clearing");
           assert.equal(runGate([repeated, ...comments], reviews).status, 0);
           comments.pop();
@@ -932,7 +932,7 @@ test("case-variant accepted receipts are discovered by the executed gate", () =>
 });
 
 test("case-variant unfamiliar receipts follow independent machine chronology", () => {
-  const opaque = summaryComment(receiptBody.replace(":rocket:", "Swish!").toUpperCase());
+  const opaque = summaryComment(receiptBody.replace(":rocket:", "A whimsical flourish.").toUpperCase());
   const later = { ...summaryComment(stateBody.replaceAll(answeredAt, "2026-10-15T22:00:00Z")), updated_at: "2026-10-15T22:00:00Z" };
   assert.equal(runGate([opaque]).status, 1);
   assert.equal(runGate([opaque, later]).status, 0);
@@ -948,7 +948,7 @@ test("validated reference definitions remain non-rendered while code and invalid
   assert.equal(runGate([summaryComment(hidden)]).status, 1, "multiline raw HTML opener hides the completion row");
   for (const suffix of ["\nRegression tests passed.", "\nOne regression test passed.", "\nOne defect report was closed.", "\nFixed one issue.", "\nThis change introduces no bugs.", "\nThis change never introduces a bug.", "\nNo issues were found except one already fixed.", "\nIssues do not exist.", "\nBugs do not remain.", "\nNo findings are pending.", "\nNo issues remain unresolved.", "\nDo&solnot merge", "\n`Do&sol;not merge`", "\n[safe](<https://example.test/a b>)", "\nAn eliminated issue was documented.", "\nThe issue is harmless.", "\nThe issue is benign.", "\nSecurity issues: none were found.", "\nSecurity issues: none are outstanding.", "\nSecurity issue: none currently exist.", "\nSecurity issue: none were found.", "\nNo issues were found except one, which was fixed.", "\nFound 1 fixed issue.", "\nSecurity issues: none found.", "\nSecurity issue: none exist.", "\nSecurity issues: zero outstanding.", "\nNo<caption>An issue remains</caption>", "\nNo<legend>An issue remains</legend>", "\nFound issues: zero", "\nIssues found: zero", "\nNo security issues found", "\n\n[safe]: P1", "\nThis is not an issue.", "\nThat is a bug that was fixed.", "\nSecurity issue: none", "\nSecurity issue: was fixed.", "\nNo issues or findings were found.", "\nA security issue got eliminated.", "\nNo code or security issues were found.", "\nThe word issues is emphasized.", "\n<div>Found **0** issues</div>", "\nThis is not an issue.", "\nNo longer an issue.", "\nThis isn't a bug.", "\nThis is not considered a bug.", "\nThis is a bug-free change.", "\nFound\n\nan issue.", "\n\nparagraph\n<span>\n[safe](P1)", "\nP_1", "\nP*1", "\nP_1_", "\n`P*1*`", "\n\n[safe]: /url\n  \"title [^note]\"\n[^note]: P1", "\n\nDo&nbsp not&nbsp merge", "\n\n`Do&nbsp not&nbsp merge`", "\n\n[safe](https://example.test/[^note])\n\n[^note]: P1 example", "\n\n<span title=\"[^note]\">safe</span>\n\n[^note]: P1 example", "\n\nnote[^bad label]\n\n[^bad label]: P1", "\n\n[^doc]: safe\n  P1", "\n\n[^doc]: safe\n    P1", "\n\n> <div>\n[safe](P1)", "\n\n- <div>\n\n[safe](P1)", "\n<div>\n<img / P1>\n</div>", "\n\n[^doc]: P1", "\n<div>\n</span P1>\n</div>", "\n\n<span>P&#49</span> blocker", "\n\n`P&#49 blocker`", "\nFound no bugs.", "\nFound 0 bugs.", "\nFound <em>no</em> issues.", "\nFound `0` issues.", "\n\n[doc]:https://example.test/P1", "\n\n[doc]:\n  https://example.test/P1"]) {
     const state = summaryComment(stateBody + suffix);
-    assert.equal(runGate([state]).status, 0, suffix);
+    assert.equal(runGate([state]).status, 1, "noncanonical prose remains pending: " + suffix);
   }
   for (const suffix of ["\nThe security issue does not exist locally but remains in production.", "\nA security issue is already fixed in tests but exploitable in production.", "\nThe issue does not remain fixed.", "\nNo issues were found except one already fixed that has reappeared.", "\nA bug must be fixed.", "\n[safe](https://example.com \"P1 blocker\"\n\n)", "\nThis change introduces a bug.", "\nThe change creates a security issue.", "\nThis change contains a vulnerability.", "\nThis change has a defect.", "\nCritical security issue remains.", "\nAuthentication vulnerability exists.", "\nAn eliminated issue reappeared.", "\nAn eliminated issue has reappeared.", "\nA resolved issue has reappeared.", "\nA fixed bug recurred.", "\nThe security issue is harmless in tests but exploitable in production.", "\nMost issues remain.", "\nEvery issue remains.", "\nNumerous issues remain.", "\n[safe](https://example.com\n\n\"P1 blocker\")", "\nA defect remains.", "\nA regression remains.", "\n[P1](<https://example.test/a b>)", "\nDo&sol;not merge", "\nBoth issues remain.", "\nMany issues remain.", "\nAll issues remain unresolved.", "\nThe bug still exists.", "\nThere still is a bug.", "\nWe have one security issue.", "\nA security issue<br>was found.", "\nOne issue persists.", "\nNo issues were found except two.", "\nAn eliminated issue may reappear.", "\nA resolved issue could recur.", "\nThe issue allows code execution.", "\nAn issue can expose secrets.", "\nThe vulnerability is exploitable.", "\nNo issues or findings were found\u2014except one.", "\nAn eliminated issue was found again.", "\nThis eliminated issue persists.", "\nA security flaw was found.", "\nTwo security issues were found.", "\n> safe\n<span>\n[safe](P1)", "\n- safe\n<span>\n[safe](P1)", "\n<div\nclass=x>\n[safe](P1)", "\nNo<center>An issue remains</center>", "\nThis is an issue.", "\nThat is a bug.", "\nSecurity issue—authentication bypass.", "\nSecurity issue: no authentication.", "\nSecurity issue: no workaround.", "\nA vulnerability was detected.", "\nA security issue has gotten flagged.", "\nA security issue had gotten flagged.", "\nSecurity issue: authentication bypass.", "\nA security issue: was flagged.", "\nThis issue is not resolved.", "\nIssues persist.", "\nFindings are outstanding.", "\nNo code changes were needed and one security issue remains.", "\nA security issue got flagged.", "\nOne security issue was identified", "\nMultiple security issues remain", "\n1 issue: zero", "\nA bug is present", "\nA problem persists", "\nAn issue is outstanding", "\n\n    code\n<span>\n[safe](P1)", "\nNo code issues: 1 security issue found", "\nFound an issue that is not yet resolved.", "\nThis is not safe because there is a bug.", "\nFound 1,000 issues.", "\n1 bug is not fixed", "\nThere is an issue that was not resolved", "\n<div>Found **1** issue</div>", "\nBug found.", "\nOne issue found.", "\nMultiple findings remain.", "\nAn issue was detected.", "\nSeveral issues were detected.", "\nSome problems remain.", "\n\nparagraph\n\n<span>\n[safe](P1)", "\n\nP**1**", "\n\n**P1**", "\n\nDo [not][ẞ] merge\n[ss]: https://example.com", "\n<!-->P1", "\n<!--->P1", "\n<div>\nDo&nbsp not&nbsp merge\n</div>", "\nThere is a bug.", "\n\nnote[^SS]\n\n[^ß]: P1 blocker", "\n\nroot[^a]\n\n[^a]: safe [^b]\n[^b]: P1", "\n\nnote[^doc]\n\n[^doc]: safe\n  P1", "\n\nnote[^doc]\n\n[^doc]: safe\n    P1", "\n\n[^bad label]: P1 blocker", "\n\n<span P1?>safe</span>", "\n\nnote[^DOC]\n\n[^doc]: P1", "\n\n<img / P1>", "\n\n<img =P1>", "\n\nnote[^doc]\n\n[^doc]: P1", "\n[safe](" + "(".repeat(33) + "P1" + ")".repeat(33) + ")", "\n\n</span P1>", "\nThere is an issue.", "\n> <div>\n> [safe](P1)\n> </div>", "\n- <div>\n  [safe](P1)\n  </div>", "\nFound 0 code issues and 1 security issue.", "\n<div>\nP&#49 blocker\n</div>", "\n<details><summary>ℹ️ About Codex in GitHub</summary>\nP&#49 blocker\n</details>", "\n[doc]: P1)", "\n[foo[bar]:https://example.test/P1", "\n<div>\n[safe](P1)\n</div>", "\n[safe\n\nlabel](P1)", "\n`[doc]:https://example.test/P1`", "\n[doc]:\n\nhttps://example.test/P1"]) {
     const state = summaryComment(stateBody + suffix);
@@ -973,10 +973,17 @@ test("section warning edits do not renew a cleared companion finding", () => {
   const securityClear = make(snapshot(false, false, codeClearTime, securityClearTime), securityClearTime);
   const answer = { ...summaryComment(receiptBody), id: 200, created_at: "2026-10-15T22:20:00Z", updated_at: "2026-10-15T22:20:00Z" };
   const negative = make(snapshot(true, true, codeTime, securityTime, "Manual request", "P1 security issue"), "2026-10-15T22:00:00Z");
+  for (const example of ["`<summary>Security Review</summary>`", "```html\n<summary>Security Review</summary>\n``` "]) {
+    const exampleClear = {...securityClear, body: securityClear.body + "\n" + example};
+    assert.equal(runGate([{...command,id:100,created_at:requestTime},negative,codeClear,exampleClear,answer]).status, 1, "noncanonical literal example cannot independently clear a finding");
+  }
   const pendingTime = "2026-10-15T22:00:00Z";
   const pendingProse = make(snapshot(false, false, pendingTime, pendingTime) + "\nP1: defect", pendingTime);
   const freshTime = "2026-10-15T22:15:00Z";
   const freshClean = make(snapshot(false, false, freshTime, freshTime), freshTime);
+  const missingCompanion = {...negative, body: negative.body.split("\n").filter(line => !line.includes("**Security Review**")).join("\n")};
+  assert.equal(runGate([{...command,id:100,created_at:requestTime},missingCompanion, codeClear, securityClear, answer]).status, 1, "missing non-absent companion row requires observed negative time");
+  assert.equal(runGate([{...command,id:100,created_at:requestTime},missingCompanion, codeClear, securityClear, freshClean, answer]).status, 0, "newer own-section completion can recover missing companion observation");
   const carriedSecurity = {...freshClean, created_at: freshTime, body: snapshot(false, false, freshTime, codeTime)};
   assert.equal(runGate([{...command,id:100,created_at:requestTime},carriedSecurity]).status, 0, "fresh code approval may carry an older coherent security completion");
   for (const label of ["Code Review", "Security Review"]) {
@@ -999,7 +1006,7 @@ test("section warning edits do not renew a cleared companion finding", () => {
   assert.equal(run(negative).status, 0, "validated security warning cannot renew the old code finding after code clear");
   const carriedClear = {...securityClear, created_at: securityClearTime};
   assert.equal(runGate([{...command, id:100, created_at:requestTime}, negative, codeClear, carriedClear, answer]).status, 0, "a valid security completion may carry an older code clock without granting code authority");
-  for (const finding of ["This change causes a regression.", "This patch exposes a vulnerability.", "A security risk remains.", "The security issue does not exist locally but remains in production.", "A security issue is already fixed in tests but exploitable in production.", "The issue does not remain fixed.", "No issues were found except one already fixed that has reappeared.", "A bug must be fixed.", "This change introduces a bug.", "The change creates a security issue.", "This change contains a vulnerability.", "This change has a defect.", "Critical security issue remains.", "Authentication vulnerability exists.", "An eliminated issue reappeared.", "An eliminated issue has reappeared.", "A resolved issue has reappeared.", "A fixed bug recurred.", "The security issue is harmless in tests but exploitable in production.", "Most issues remain.", "Every issue remains.", "Numerous issues remain.", "A defect remains.", "A regression remains.", "[P1](<https://example.test/a b>)", "Do&sol;not merge", "Both issues remain.", "Many issues remain.", "All issues remain unresolved.", "The bug still exists.", "There still is a bug.", "We have one security issue.", "A security issue<br>was found.", "One issue persists.", "No issues were found except two.", "An eliminated issue may reappear.", "A resolved issue could recur.", "The issue allows code execution.", "An issue can expose secrets.", "The vulnerability is exploitable.", "No issues or findings were found\u2014except one.", "An eliminated issue was found again.", "This eliminated issue persists.", "A security flaw was found.", "Two security issues were found.", "This is an issue.", "That is a bug.", "Security issue—authentication bypass.", "Security issue: no authentication.", "Security issue: no workaround.", "A vulnerability was detected.", "A security issue has gotten flagged.", "A security issue had gotten flagged.", "Security issue: authentication bypass.", "A security issue: was flagged.", "This issue is not resolved.", "Issues persist.", "Findings are outstanding.", "No code changes were needed and one security issue remains.", "A security issue got flagged.", "A bug is present", "A problem persists", "An issue is outstanding"]) {
+  for (const finding of ["Users can bypass authentication.", "The review mentioned a bug that has not been fixed.", "The review mentioned a bug that is still open.", "It is possible to bypass authentication.", "The mentioned vulnerability allows code execution.", "The discussed vulnerability is exploitable.", "Users can trivially bypass authentication.", "The review mentioned a bug that is open.", "We discussed a vulnerability that is outstanding.", "Can bypass authentication without credentials.", "Users are able to bypass authentication.", "One bug fix remains incomplete.", "The review mentioned a bug that remains.", "We discussed a bug that persists.", "The review mentioned an issue that remains unresolved.", "We discussed a bug that remains open.", "The application is vulnerable to SQL injection.", "Authentication can be bypassed.", "I see a bug.", "We identify an issue.", "This change introduces multiple bugs.", "This change contains some issues.", "This change has several regressions.", "This change causes a regression.", "This patch exposes a vulnerability.", "A security risk remains.", "The security issue does not exist locally but remains in production.", "A security issue is already fixed in tests but exploitable in production.", "The issue does not remain fixed.", "No issues were found except one already fixed that has reappeared.", "A bug must be fixed.", "This change introduces a bug.", "The change creates a security issue.", "This change contains a vulnerability.", "This change has a defect.", "Critical security issue remains.", "Authentication vulnerability exists.", "An eliminated issue reappeared.", "An eliminated issue has reappeared.", "A resolved issue has reappeared.", "A fixed bug recurred.", "The security issue is harmless in tests but exploitable in production.", "Most issues remain.", "Every issue remains.", "Numerous issues remain.", "A defect remains.", "A regression remains.", "[P1](<https://example.test/a b>)", "Do&sol;not merge", "Both issues remain.", "Many issues remain.", "All issues remain unresolved.", "The bug still exists.", "There still is a bug.", "We have one security issue.", "A security issue<br>was found.", "One issue persists.", "No issues were found except two.", "An eliminated issue may reappear.", "A resolved issue could recur.", "The issue allows code execution.", "An issue can expose secrets.", "The vulnerability is exploitable.", "No issues or findings were found\u2014except one.", "An eliminated issue was found again.", "This eliminated issue persists.", "A security flaw was found.", "Two security issues were found.", "This is an issue.", "That is a bug.", "Security issue—authentication bypass.", "Security issue: no authentication.", "Security issue: no workaround.", "A vulnerability was detected.", "A security issue has gotten flagged.", "A security issue had gotten flagged.", "Security issue: authentication bypass.", "A security issue: was flagged.", "This issue is not resolved.", "Issues persist.", "Findings are outstanding.", "No code changes were needed and one security issue remains.", "A security issue got flagged.", "A bug is present", "A problem persists", "An issue is outstanding"]) {
     const edited = { ...negative, body: negative.body + "\n<details><summary>ℹ️ About Codex in GitHub</summary>About</details>\n" + finding };
     assert.equal(run(edited).status, 1, "indefinite finding after actual About footer retains observation time: " + finding);
     if (["[P1](<https://example.test/a b>)", "Do&sol;not merge", "Both issues remain.", "Many issues remain.", "All issues remain unresolved.", "The bug still exists.", "There still is a bug.", "We have one security issue.", "A security issue<br>was found.", "One issue persists.", "No issues were found except two.", "An eliminated issue may reappear.", "A resolved issue could recur.", "The issue allows code execution.", "An issue can expose secrets.", "The vulnerability is exploitable.", "No issues or findings were found\u2014except one.", "An eliminated issue was found again.", "This eliminated issue persists.", "A security flaw was found.", "Two security issues were found.", "This is an issue.", "That is a bug."].includes(finding)) {
@@ -1008,9 +1015,9 @@ test("section warning edits do not renew a cleared companion finding", () => {
       assert.equal(runGate([{ ...command, id: 100, created_at: requestTime }, edited, codeClear, securityClear, recovery, answer]).status, 0, "strictly newer same-section canonical completion clears nominal finding");
     }
   }
-  for (const benign of ["This change fixes a bug.", "This change resolves an issue.", "A business risk remains.", "No security risks remain.", "The security risk was resolved.", "Regression tests passed.", "One regression test passed.", "One defect report was closed.", "Fixed one issue.", "This change introduces no bugs.", "This change never introduces a bug.", "No issues were found except one already fixed.", "Issues do not exist.", "Bugs do not remain.", "No findings are pending.", "No issues remain unresolved.", "An eliminated issue was documented.", "The issue is harmless.", "The issue is benign.", "Security issues: none were found.", "Security issues: none are outstanding.", "Security issue: none currently exist.", "Security issue: none were found.", "No issues were found except one, which was fixed.", "Found 1 fixed issue."]) {
+  for (const benign of ["The review mentioned a bug fix.", "We discussed a bug.", "Users cannot bypass authentication.", "No users can bypass authentication.", "Neither user can bypass authentication.", "None can bypass authentication.", "A security issue was not found.", "None of the findings remain.", "Nobody can bypass authentication.", "No unauthenticated users can bypass authentication.", "The review mentioned a bug that remains fixed.", "We discussed a bug that remains resolved.", "The review mentioned an issue that remains closed.", "The application is not vulnerable to SQL injection.", "Authentication cannot be bypassed.", "We fix an issue.", "We prevent a bug.", "This change prevents a bug.", "This change avoids a regression.", "This change mitigates an issue.", "This change fixes a bug.", "This change resolves an issue.", "A business risk remains.", "No security risks remain.", "The security risk was resolved.", "Regression tests passed.", "One regression test passed.", "One defect report was closed.", "Fixed one issue.", "This change introduces no bugs.", "This change never introduces a bug.", "No issues were found except one already fixed.", "Issues do not exist.", "Bugs do not remain.", "No findings are pending.", "No issues remain unresolved.", "An eliminated issue was documented.", "The issue is harmless.", "The issue is benign.", "Security issues: none were found.", "Security issues: none are outstanding.", "Security issue: none currently exist.", "Security issue: none were found.", "No issues were found except one, which was fixed.", "Found 1 fixed issue."]) {
     const edited = { ...negative, body: negative.body + "\n<details><summary>ℹ️ About Codex in GitHub</summary>About</details>\n" + benign };
-    assert.equal(run(edited).status, 0, "benign statement must not renew a cleared finding: " + benign);
+    assert.equal(run(edited).status, 1, "unrecognized prose retains observation time regardless of apparent meaning: " + benign);
   }
   const contradictoryClean = make(snapshot(true, false, codeTime, securityTime, "Manual request", "P1 security issue"), "2026-10-15T22:00:00Z");
   assert.equal(run(contradictoryClean).status, 1, "false/false companion cannot hide a contradictory original trigger");
@@ -1049,4 +1056,50 @@ test("completion clocks cannot predate their carrying comment", () => {
 test("explicit qualified security risk cannot approve clean state", () => {
   const state = summaryComment(stateBody + "\nA security risk remains.");
   assert.equal(runGate([state]).status, 1);
+});
+
+
+test("ordinary backtick spans normalize without repeated suffix copies", async () => {
+  const { containsBlockingCodexSeverity } = await import("../scripts/codex-review-helpers.mjs");
+  const text = "`x` ".repeat(16000);
+  const started = performance.now();
+  assert.equal(containsBlockingCodexSeverity(text), false);
+  assert.equal(containsBlockingCodexSeverity(text + " P1 blocker"), true);
+  assert.ok(performance.now() - started < 5000, "near-limit ordinary code spans must not exhaust the review gate");
+});
+
+
+test("closer-only emphasis runs avoid scanning ineligible delimiter prefixes", async () => {
+  const { containsBlockingCodexSeverity } = await import("../scripts/codex-review-helpers.mjs");
+  const started = performance.now();
+  const prose = "a_ ".repeat(21000);
+  assert.equal(containsBlockingCodexSeverity(prose), false);
+  assert.equal(containsBlockingCodexSeverity(prose + " P1 blocker"), true);
+  assert.ok(performance.now() - started < 5000);
+});
+
+
+test("negative subjects do not assert authentication bypass", () => {
+  assert.equal(runGate([command, summaryComment(stateBody + "\nNobody can bypass authentication.")]).status, 1);
+});
+
+
+test("copular active findings survive informational mentions", () => {
+  for (const suffix of ["The review mentioned a bug that is open.", "We discussed a vulnerability that is outstanding."]) {
+    assert.equal(runGate([command, summaryComment(stateBody + "\n" + suffix)]).status, 1);
+  }
+});
+
+
+test("active predicates survive adjectival mentions and modal adverbs", () => {
+  for (const suffix of ["The mentioned vulnerability allows code execution.", "The discussed vulnerability is exploitable.", "Users can trivially bypass authentication."]) {
+    assert.equal(runGate([command, summaryComment(stateBody + "\n" + suffix)]).status, 1);
+  }
+});
+
+
+test("qualified absence and current finding state retain their own polarity", () => {
+  for (const [suffix, expected] of [["The review mentioned a bug that has not been fixed.", 1], ["The review mentioned a bug that is still open.", 1], ["It is possible to bypass authentication.", 1], ["Neither user can bypass authentication.", 0], ["None can bypass authentication.", 0], ["A security issue was not found.", 0], ["None of the findings remain.", 0]]) {
+    assert.equal(runGate([command, summaryComment(stateBody + "\n" + suffix)]).status, 1, "closed presentation: " + suffix);
+  }
 });
