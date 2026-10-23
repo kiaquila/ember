@@ -2,7 +2,10 @@
    decisions live in the helpers, so they are exercised here directly. */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
 import { parse } from "yaml";
 import { fetchCodexReviewEvidence } from "../scripts/codex-review-gate.mjs";
 import test from "node:test";
@@ -10,6 +13,7 @@ import test from "node:test";
 import {
   classifyCodexNativeReview,
   evaluateCodexReviewEvidence,
+  isAffirmativeCodexReviewState,
   isAcceptableCodexSummaryComment,
   isCodexReviewCommand,
   isCodexReviewCommandForHead,
@@ -275,7 +279,7 @@ const receiptBody = `<!-- codex-review-receipt:v1 -->\n\n${legacyBody.replace("i
 const stateBody = `<!-- codex-pull-request-review-summary -->\n<!-- codex-review-state:v1 ${JSON.stringify({
   code_review: { commit_sha: headSha, has_any_findings: false, has_unresolved_findings: false, status: "completed" },
   security_review: { commit_sha: null, has_any_findings: null, has_unresolved_findings: null, status: null }
-})} -->\n\n## Codex Review Summary\n\nCompleted 👍`;
+})} -->\n\n## Codex Review Summary\n\n| 📝 **Code Review** | ✅ **Completed** <relative-time datetime="${answeredAt}">${answeredAt}</relative-time> | \`${headSha.slice(0, 7)}\` | Manual request |`;
 const summaryComment = (body = receiptBody) => ({
   id: 20, user: codexUser, body, created_at: answeredAt, updated_at: answeredAt
 });
@@ -292,7 +296,7 @@ test("real receipt and legacy answers pass, including native GitHub details", ()
   for (const body of [legacyBody, receiptBody, receiptBody.replace(":rocket:", "Keep it up!"),
     receiptBody.replace(":rocket:", "Hooray!"),
     receiptBody.replace(":rocket:", "More of your lovely PRs please."),
-    `${receiptBody}\n\n<details> <summary>ℹ️ About Codex in GitHub</summary>\n<br/>\n\nReviews are triggered when you comment \"@codex review\".\n</details>`]) {
+    receiptBody + "\n\n" + "<details> <summary>ℹ️ About Codex in GitHub</summary>\n<br/>\n\n[Your team has set up Codex to review pull requests in this repo](https://chatgpt.com/codex/cloud/settings/general). Reviews are triggered when you\n- Open a pull request for review\n- Mark a draft as ready\n- Comment \"@codex review\".\n\nIf Codex has suggestions, it will comment; otherwise it will react with 👍.\n\n\n\n\nCodex can also answer questions or update the PR. Try commenting \"@codex address that feedback\".\n            \n</details>"]) {
     assert.equal(isAcceptableCodexSummaryComment(summaryComment(body), headSha, requestedAt, "10"), true);
     assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, summaryComment(body)] })), "pass");
   }
@@ -302,7 +306,7 @@ test("receipts fail closed on stale, absent, ambiguous or conflicting evidence",
   for (const body of [
     receiptBody.replace(headSha.slice(0, 10), "f".repeat(10)),
     receiptBody.replace(/\*\*Reviewed commit:[\s\S]*/, ""),
-    receiptBody.replace(headSha.slice(0, 10), headSha),
+    receiptBody.replace(headSha.slice(0, 10), "f".repeat(40)),
     receiptBody.replace("receipt:v1", "receipt:v2"),
     receiptBody.replace("<!--", "<!-"),
     `${receiptBody}\n\n${receiptBody}`,
@@ -318,7 +322,7 @@ test("receipts fail closed on stale, absent, ambiguous or conflicting evidence",
     receiptBody.replace("Didn't find any major issues.", "Found P1 issues."),
     receiptBody.replace("Didn't find any major issues.", "Review in progress."),
     `${stateBody}\n\n${receiptBody}`,
-    "Completed 👍", stateBody,
+    "Completed 👍",
     stateBody.replace('"completed"', '"in_progress"'),
     stateBody.replace('"has_any_findings":false', '"has_any_findings":true'),
     stateBody.replace(headSha, "f".repeat(40)),
@@ -331,9 +335,9 @@ test("receipts fail closed on stale, absent, ambiguous or conflicting evidence",
   assert.equal(isAcceptableCodexSummaryComment({ ...summaryComment(), user: { login: "github-actions[bot]" } }, headSha, requestedAt, "10"), false);
   assert.equal(isAcceptableCodexSummaryComment({ ...summaryComment(), created_at: requestedAt, id: 11 }, headSha, requestedAt, "10"), true);
   assert.equal(isAcceptableCodexSummaryComment({ ...summaryComment(), created_at: requestedAt, id: 9 }, headSha, requestedAt, "10"), false);
-  // Editing an old summary wakes the gate but cannot manufacture new evidence.
+  // A fresh machine-state update can complete a request; an edited receipt cannot.
   const edited = { ...summaryComment(stateBody), created_at: "2026-10-14T12:00:00Z", updated_at: answeredAt };
-  assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, edited] })), "pending");
+  assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, edited] })), "pass");
   assert.equal(isAcceptableCodexSummaryComment({ ...edited, body: receiptBody }, headSha, requestedAt, "10"), false);
 });
 
@@ -483,4 +487,619 @@ test("requeue aborts on a new push or closed PR and bounds active-run waiting", 
     request: async () => ({ workflow_runs: [{ ...completedRun, status: "in_progress" }] })
   }), /remained active/);
   assert.equal(sleeps, 2);
+});
+
+// Independent machine completion permits any neutral closing without teaching
+// the legacy receipt parser new phrases. The receipt itself remains strict.
+test("only newer structured proof supersedes an unfamiliar closing", () => {
+  const run = (answers) => evaluateCodexReviewEvidence(evidence({ comments: [command, ...answers] }));
+  const state = summaryComment(stateBody);
+  for (const suffix of ["A whimsical flourish.", "No worries!", "Sunshine and confetti! 🎉"]) {
+    const answer = summaryComment(receiptBody.replace(":rocket:", suffix));
+    assert.equal(run([answer]), "pending");
+    for (const newerState of [true, false]) {
+      const later = { ...(newerState ? { ...state, body: state.body.replaceAll(answeredAt, "2026-10-15T22:00:00Z") } : answer), id: 99, created_at: "2026-10-15T22:00:00Z", updated_at: "2026-10-15T22:00:00Z" };
+      const answers = newerState ? [answer, later] : [state, later];
+      assert.equal(run(answers), newerState ? "pass" : "pending", suffix);
+
+    }
+  }
+  for (const suffix of ["A whimsical flourish. <!-- unknown -->", "A whimsical flourish.\nExtra line.", "P0 finding", "P1 finding", "P2 finding"]) {
+    assert.equal(run([state, summaryComment(receiptBody.replace(":rocket:", suffix))]), "pending", suffix);
+  }
+  for (const bad of [stateBody.replace('"completed"', '"running"'), stateBody.replace('"has_any_findings":false', '"has_any_findings":true'), stateBody.replace('"code_review":', '"code_review":{},"code_review":'), stateBody.replace('"status":"completed"', '"extra":false,"status":"completed"'), stateBody.replace('"status":"completed"', '"status":true'), stateBody.replace('"status":null', '"status":"running"'), stateBody.replace('"commit_sha":null', '"commit_sha":"' + "f".repeat(40) + '"'), stateBody.replace('"code_review":', '"code_review":broken'), stateBody + "\n<!-- codex-review-state:v1 {} -->"]) {
+    const newer = { ...summaryComment(bad), id: 100, updated_at: "2026-10-15T22:00:00Z" };
+    assert.equal(run([state, newer]), "pending", bad);
+
+  }
+  assert.equal(run([{ ...state, updated_at: "2026-10-15T19:00:00Z" }]), "pending");
+  assert.equal(run([{ ...state, user: { login: "fake-codex[bot]" } }]), "pending");
+});
+
+function runGate(comments, reviews = []) {
+  const directory = mkdtempSync(join(tmpdir(), "ember-gate-test-"));
+  try {
+    const fixture = { comments: [command, ...comments], headSha, reviews };
+    const preload = join(directory, "mock.mjs");
+    writeFileSync(preload, `const fixture = ${JSON.stringify(fixture)};
+      globalThis.fetch = async (url) => {
+        const path = new URL(url).pathname; let data;
+        if (path === '/graphql') data = { data: { repository: { pullRequest: { reviewThreads: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } } } } };
+        else if (path.endsWith('/pulls/1')) data = { head: { sha: fixture.headSha } };
+        else if (path.includes('/issues/1/comments')) data = fixture.comments;
+      else if (path.endsWith('/reviews')) data = fixture.reviews;
+        else data = [];
+        return { ok: true, json: async () => data };
+      };`);
+    return spawnSync(process.execPath, ["--import", preload, resolve(import.meta.dirname, "../scripts/codex-review-gate.mjs")], {
+      encoding: "utf8", env: { ...process.env, GITHUB_TOKEN: "test-token", GITHUB_REPOSITORY: "owner/repo", CODEX_REVIEW_PR_NUMBER: "1", CODEX_REVIEW_HEAD_SHA: headSha, CODEX_REVIEW_WAIT_MS: "1", CODEX_REVIEW_POLL_MS: "1", CODEX_REVIEW_DEBOUNCE_MS: "0", GITHUB_STEP_SUMMARY: "" }
+    });
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+}
+
+test("executed gate requires independent state for unfamiliar closings", () => {
+  const state = summaryComment(stateBody);
+  const opaque = summaryComment(receiptBody.replace(":rocket:", "A whimsical flourish."));
+  for (const comments of [[state], [opaque, { ...state, body: state.body.replaceAll(answeredAt, "2026-10-15T22:00:00Z"), updated_at: "2026-10-15T22:00:00Z" }]]) {
+    const result = runGate(comments);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Codex Review passed/);
+  }
+  for (const comments of [[state, { ...opaque, created_at: "2026-10-15T22:00:00Z", updated_at: "2026-10-15T22:00:00Z" }], [state, opaque], [opaque], [{ ...state, updated_at: "2026-10-15T19:00:00Z" }],
+    [state, { ...summaryComment(stateBody.replace('"completed"', '"running"')), updated_at: "2026-10-15T22:00:00Z" }],
+    [state, summaryComment(receiptBody.replace(":rocket:", "P2 finding"))],
+    [summaryComment(stateBody.replace('"status":null', '"status":"running"'))],
+    [summaryComment(stateBody.replace('"code_review":', '"code_review":{},"code_review":'))]]) {
+    assert.equal(runGate(comments).status, 1);
+  }
+});
+
+test("latest malformed, negative or ambiguous summary supersedes clean state", () => {
+  const run = (comments) => evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments] }));
+  const clean = summaryComment(stateBody);
+  for (const body of [stateBody + "\n<P1?> blocker", stateBody + "\n[safe\\]( P1)", stateBody + "\n<details><summary>ℹ️ About Codex in GitHub</summary>\n`[safe](P1)`\n</details>", stateBody + "\n<details><summary>ℹ️ About Codex in GitHub</summary>\n```text\n[safe](P1)\n```\n</details>", stateBody + "\n<details><summary>ℹ️ About Codex in GitHub</summary>\n<code>[safe](P1)</code>\n</details>", stateBody + "\n<details><summary>ℹ️ About Codex in GitHub</summary>\n<pre>\n[safe](P1)\n</pre>\n</details>", stateBody + "\n\\[safe](P1)", stateBody + "\n<details><summary>ℹ️ About Codex in GitHub</summary>\n\nDo [not]( https://example.com ) merge\n</details>", stateBody + "\n<details><summary>ℹ️ About Codex in GitHub</summary>\n\nDo [not]() merge\n</details>", stateBody + "\n[safe](P1>)", stateBody + "\n<details><summary>ℹ️ About Codex in GitHub</summary>\nFound issues.\n</details>", stateBody + "\n<details><summary>ℹ️ About Codex in GitHub</summary>\nSecurity review failed.\n</details>", stateBody + "\n<details><summary>ℹ️ About Codex in GitHub</summary>\nReview pending.\n</details>", stateBody + "\n<details><summary>ℹ️ About Codex in GitHub</summary>\nChanges requested.\n</details>", stateBody + "\n<details><summary>ℹ️ About Codex in GitHub</summary>\n| 🛡️ **SECURITY REVIEW** | ✅ **Completed** |\n</details>", stateBody + "\n[safe](P1\\ blocker)", stateBody + "\n<details><summary>ℹ️ About Codex in GitHub</summary>\n\nDo [not](https://example.com \"title\") merge\n</details>", stateBody + "\n<details><summary>ℹ️ About Codex in GitHub</summary>\n\nDo [not](https://example.com 'title') merge\n</details>", stateBody + "\n<details><summary>ℹ️ About Codex in GitHub</summary>\n\nDo [not](https://example.com (title)) merge\n</details>", stateBody + "\n<details><summary>ℹ️ About Codex in GitHub</summary>\nDo <span title=\"&#34;>\">not</span> merge\n</details>", stateBody + "\n<details><summary>ℹ️ About Codex in GitHub</summary>\n<!--[x](foo-->P1)\n</details>", stateBody + "\n<details><summary>ℹ️ About Codex in GitHub</summary>\n[safe][P1 blocker]\n</details>", stateBody.replace(/\s*<details>\s*<summary>ℹ️ About Codex in GitHub<\/summary>[\s\S]*<\/details>\s*$/, "") + "\n<details><summary>ℹ️ About Codex in GitHub</summary>\n\nDo [not] merge\n[not]: https://example.com\n</details>", stateBody.replace(/\s*<details>\s*<summary>ℹ️ About Codex in GitHub<\/summary>[\s\S]*<\/details>\s*$/, "") + "\n<details><summary>ℹ️ About Codex in GitHub</summary>\n\nDo [not][] merge\n[not]: https://example.com\n</details>", stateBody.replace(/\s*<details>\s*<summary>ℹ️ About Codex in GitHub<\/summary>[\s\S]*<\/details>\s*$/, "") + "\n<details><summary>ℹ️ About Codex in GitHub</summary>\n> " + withSecurityProof(stateBody).match(/^\| 🛡️ \*\*Security Review\*\*.*$/m)[0].replace("Security Review", "Security&#32;Review") + "\n</details>", stateBody.replace("## Codex Review Summary", "## Codex Review Summary\n<img src=\"invalid\" alt=\"P1 blocker\">"), stateBody.replace("## Codex Review Summary", "## Codex Review Summary\n[safe](P1 blocker)"), stateBody.replace(/\s*<details>\s*<summary>ℹ️ About Codex in GitHub<\/summary>[\s\S]*<\/details>\s*$/, "").replace("Manual request", "Do [not][x] merge") + "\n<details><summary>ℹ️ About Codex in GitHub</summary>\n\n[x]: https://example.com\n</details>", stateBody.replace(/\s*<details>\s*<summary>ℹ️ About Codex in GitHub<\/summary>[\s\S]*<\/details>\s*$/, "") + "\n<details><summary>ℹ️ About Codex in GitHub</summary>\nDo <span title=\">\">not</span> merge\n</details>", stateBody.replace(/\s*<details>\s*<summary>ℹ️ About Codex in GitHub<\/summary>[\s\S]*<\/details>\s*$/, "") + "\n<details><summary>ℹ️ About Codex in GitHub</summary>\n\nDo [not](https://example.com/(x)) merge\n</details>", stateBody.replace(/^<!--/, "    \u00A0<!--"), stateBody.replace("## Codex Review Summary", "## Codex Review Summary\nDo [not](https://example.com/(x)) merge"), stateBody.replace("## Codex Review Summary", "## Codex Review Summary\nDo <!--hidden-->not merge"), stateBody.replace("## Codex Review Summary", "## Codex Review Summary\nP<!--hidden-->1 blocker"), stateBody.replace(/\s*<details>\s*<summary>ℹ️ About Codex in GitHub<\/summary>[\s\S]*<\/details>\s*$/, "") + "\n<details><summary>ℹ️ About Codex in GitHub</summary>P\uFE0F1 blocker</details>", stateBody.replace(/\s*<details>\s*<summary>ℹ️ About Codex in GitHub<\/summary>[\s\S]*<\/details>\s*$/, "") + "\n<details><summary>ℹ️ About Codex in GitHub</summary>\nP\uFE0F1 blocker\n</details>", stateBody.replace("## Codex Review Summary", "## Codex Review Summary\nDo&#8203;not&#8203;merge"), stateBody.replace("## Codex Review Summary", "## Codex Review Summary\nDo&ZeroWidthSpace;not&ZeroWidthSpace;merge"), stateBody.replace("## Codex Review Summary", "## Codex Review Summary\nDo&ThinSpace;not&ThinSpace;merge"), stateBody.replace(/^<!--/, "    \uFEFF<!--"), stateBody.replace("## Codex Review Summary", "## Codex Review Summary\nP<strong>1</strong> blocker"), stateBody.replace("## Codex Review Summary", "## Codex Review Summary\nDo <em>not</em> merge"), stateBody.replace("## Codex Review Summary", "## Codex Review Summary\nDo [not](https://example.com) merge"), stateBody.replace("## Codex Review Summary", "## Codex Review Summary\nP&#8203;1 blocker"), stateBody.replace(/\s*<details>\s*<summary>ℹ️ About Codex in GitHub<\/summary>[\s\S]*<\/details>\s*$/, "").replace(/^(\| 📝 \*\*Code Review\*\*.*)$/m, "<details><summary>ℹ️ About Codex in GitHub</summary>\n$1\n</details>"), stateBody.replace("## Codex Review Summary", "## Codex Review Summary\nDo&MediumSpace;not&MediumSpace;merge"), stateBody.replace("## Codex Review Summary", "## Codex Review Summary\nDo&hairsp;not&hairsp;merge"), stateBody.replace("## Codex Review Summary", "\uFEFF    ## Codex Review Summary"), stateBody.replace("## Codex Review Summary", "<!-- presentation metadata -->    ## Codex Review Summary"), stateBody.replace("## Codex Review Summary", "## Codex Review Summary\nP&#49; blocker"), stateBody.replace("## Codex Review Summary", "## Codex Review Summary\nP&#x31; blocker"), stateBody.replace("## Codex Review Summary", "## Codex Review Summary\nP*1* blocker"), stateBody.replace("## Codex Review Summary", "## Codex Review Summary\nDo&#32;not&#32;merge"), stateBody.replace("## Codex Review Summary", "## Codex Review Summary\nDo&#x20;not&#x20;merge"), stateBody.replace(/^(\| 📝 \*\*Code Review\*\*.*)$/m, "```html\n$1\n````"), stateBody.replace("Manual request", "Do not merge"), stateBody.replace("Manual request", "Do not&nbsp;merge"), stateBody.replace("## Codex Review Summary", "    ## Codex Review Summary"), stateBody.replace("## Codex Review Summary", "\t## Codex Review Summary"), stateBody.replace("Manual request", "Do **not** merge"), "<!-- TODO -->\n<!-- codex-review-state:v1 {broken} -->", stateBody.replace(/^(\| 📝 \*\*Code Review\*\*.*)$/m, "```html\n$1\n```"), "\uFEFF" + stateBody.replace(/^<!--/, "    <!--"), "\uFEFF" + stateBody.replace(/^<!--/, "\t<!--"), stateBody.replaceAll("codex-", "CODEX-"), stateBody.replaceAll("codex-", "CoDeX-"), stateBody.replace(/^<!--/gm, "    <!--"), stateBody.replace(/^<!--/gm, "\t<!--"), stateBody.replace(/^(<!-- codex-review-state:)/m, "    $1"), stateBody.replace("state:v1", "state:v2"), stateBody.replace('"completed"', '"pending"'), stateBody.replace('"commit_sha":"', '"commit_sha":"f'), stateBody + "\nP0: blocker", stateBody + "\n**Reviewed commit:** `abcdef0123`", stateBody.replace('"status":"completed"', '"status":"completed","status":"completed"')]) {
+    const invalid = { ...summaryComment(body), id: 1 };
+    assert.equal(run([clean, invalid]), "pending", body);
+    assert.equal(run([invalid, clean]), "pending", body);
+    assert.notEqual(runGate([clean, invalid]).status, 0, body);
+    assert.equal(run([clean, { ...invalid, updated_at: "2026-10-15T22:00:00Z" }]), "pending", body);
+  }
+});
+
+test("visible contradictions and latest pending state veto positive formal review", () => {
+  const reviews = [{ id: 1, commit_id: headSha, state: "COMMENTED", user: codexUser, submitted_at: answeredAt }];
+  const run = (comments) => evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments], reviews }));
+  for (const body of [stateBody.replace("## Codex Review Summary", "## Unknown Summary"), stateBody.replace("## Codex Review Summary", "## Codex Review Summary\nFound unresolved issues."), stateBody.replace("## Codex Review Summary", "## Codex Review Summary\nSecurity Review failed."), stateBody.replace("## Codex Review Summary", "## Codex Review Summary\nCode Review running."), stateBody.replace('"completed"', '"running"'), stateBody.replace('"status":null', '"status":"running"')]) {
+    assert.equal(run([summaryComment(body)]), "pending", body);
+  }
+});
+
+test("affirmative machine state never hides native P0-P2 findings", () => {
+  for (const priority of [0, 1, 2]) {
+    const reviews = [{ id: 1, commit_id: headSha, state: "COMMENTED", user: codexUser, submitted_at: answeredAt, body: `P${priority}: actionable finding` }];
+    assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, summaryComment(stateBody)], reviews })), "fail");
+  }
+});
+
+test("machine chronology does not interpret arbitrary prose as neutral", () => {
+  const run = (comments) => evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments] }));
+  for (const suffix of ["Broken; avoid merging!", "Do not merge.", "A vulnerability remains.", "Needs work.", "No worries!"]) {
+    const answer = summaryComment(receiptBody.replace(":rocket:", suffix));
+    const newer = { ...summaryComment(stateBody.replaceAll(answeredAt, "2026-10-15T22:00:00Z")), id: 99, updated_at: "2026-10-15T22:00:00Z" };
+    assert.equal(run([answer]), "pending", suffix);
+    assert.equal(run([answer, newer]), "pass", suffix);
+    assert.equal(run([summaryComment(stateBody), { ...answer, created_at: "2026-10-15T22:00:00Z", updated_at: "2026-10-15T22:00:00Z" }]), "pending", suffix);
+    assert.equal(run([summaryComment(stateBody), answer]), "pending", suffix);
+  }
+});
+
+test("security-only edits cannot renew code completion or supersede later receipts", () => {
+  const run = (comments) => evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments] }));
+  const state = summaryComment(stateBody);
+  const unknown = { ...summaryComment(receiptBody.replace(":rocket:", "A whimsical flourish.")), created_at: "2026-10-15T21:30:00Z", updated_at: "2026-10-15T21:30:00Z" };
+  const securityOnly = { ...state, updated_at: "2026-10-15T22:00:00Z" };
+  assert.equal(run([unknown, securityOnly]), "pending");
+  const staleCode = { ...securityOnly, body: state.body.replaceAll(answeredAt, "2026-10-15T19:00:00Z") };
+  assert.equal(run([staleCode]), "pending");
+  // Real native rows carry subsecond timestamps but GitHub's updated_at is
+  // truncated to seconds. Same-second unknown prose still wins conservatively.
+  const fractional = { ...state, body: state.body.replaceAll(answeredAt, answeredAt.replace("Z", ".070069Z")) };
+  assert.equal(run([fractional]), "pass");
+  assert.equal(run([fractional, summaryComment(receiptBody.replace(":rocket:", "A whimsical flourish."))]), "pending");
+  const future = { ...state, body: state.body.replaceAll(answeredAt, "2026-10-15T23:00:00Z") };
+  assert.equal(run([future]), "pending");
+});
+
+test("same-second request/completion ambiguity and impossible dates fail closed", () => {
+  const run = (comments) => evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments] }));
+  const ambiguous = { ...summaryComment(stateBody.replaceAll(answeredAt, requestedAt.replace("Z", ".070069Z"))), updated_at: requestedAt };
+  assert.equal(run([ambiguous]), "pending");
+  const impossible = { ...summaryComment(stateBody.replaceAll(answeredAt, "2026-02-30T21:00:00Z")), updated_at: "2026-10-15T22:00:00Z" };
+  assert.equal(isAffirmativeCodexReviewState(impossible, headSha, "2026-02-28T20:00:00Z", 10), false);
+});
+
+
+test("receipt edits cannot outrank newer pending or negative summaries", () => {
+  const edited = { ...summaryComment(receiptBody), updated_at: "2026-10-15T23:00:00Z" };
+  for (const status of ["running", "failed"]) {
+    const pending = { ...summaryComment(stateBody.replace('"completed"', JSON.stringify(status))), updated_at: "2026-10-15T22:00:00Z" };
+    const comments = [edited, pending];
+    assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments] })), "pending");
+    assert.equal(runGate(comments).status, 1);
+  }
+  const old = { ...edited, created_at: "2026-10-15T19:00:00Z" };
+  const comments = [old, summaryComment(stateBody)];
+  assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments] })), "pass", "editing a pre-request receipt does not rebind it");
+});
+
+
+test("editing unknown receipt text invalidates an older clean completion", () => {
+  const state = { ...summaryComment(stateBody.replaceAll(answeredAt, "2026-10-15T22:00:00Z")), updated_at: "2026-10-15T22:00:00Z" };
+  const answer = summaryComment(receiptBody.replace(":rocket:", "Broken; avoid merging!"));
+  assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, answer, state] })), "pass");
+  for (const created_at of [answer.created_at, "2026-10-15T19:00:00Z"]) {
+    const comments = [state, { ...answer, created_at, updated_at: "2026-10-15T23:00:00Z" }];
+    assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments] })), "pending");
+    assert.equal(runGate(comments).status, 1);
+  }
+});
+
+
+test("same-second receipts preceding the request cannot veto a fresh answer", () => {
+  const previous = { ...summaryComment(receiptBody), id: 9, created_at: requestedAt };
+  const comments = [previous, summaryComment(receiptBody)];
+  assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments] })), "pass");
+  assert.equal(runGate(comments).status, 0);
+  const current = { ...previous, id: 11 };
+  assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, current] })), "pass", "later numeric ID proves same-second freshness");
+});
+
+
+test("a fresh completion supersedes an eligible pre-request receipt edit", () => {
+  const edited = { ...summaryComment(receiptBody.replace(":rocket:", "A whimsical flourish.")), created_at: "2026-10-15T19:00:00Z", updated_at: "2026-10-15T21:30:00Z" };
+  const state = { ...summaryComment(stateBody.replaceAll(answeredAt, "2026-10-15T22:00:00Z")), updated_at: "2026-10-15T22:00:00Z" };
+  const comments = [edited, state];
+  assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments] })), "pass");
+  assert.equal(runGate(comments).status, 0);
+  edited.updated_at = "2026-10-15T23:00:00Z";
+  assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments] })), "pending");
+  assert.equal(runGate(comments).status, 1);
+});
+
+
+test("a mutable summary edit tied with the request stays pending despite its old ID", () => {
+  const updated = { ...summaryComment(stateBody.replace('"completed"', '"running"')), id: 9, created_at: "2026-10-15T19:00:00Z", updated_at: requestedAt };
+  const answer = { ...summaryComment(receiptBody), id: 11, created_at: requestedAt, updated_at: requestedAt };
+  const comments = [updated, answer];
+  assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments] })), "pending", "the lower ID dates creation, not the edit within this second");
+  assert.equal(runGate(comments).status, 1);
+});
+
+
+test("a later completion supersedes an ambiguous same-second receipt edit", () => {
+  const edited = { ...summaryComment(receiptBody.replace(":rocket:", "A whimsical flourish.")), id: 9, created_at: "2026-10-15T19:00:00Z", updated_at: requestedAt };
+  const comments = [edited];
+  assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments] })), "pending");
+  comments.push(summaryComment(stateBody));
+  assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments] })), "pass");
+  assert.equal(runGate(comments).status, 0);
+});
+
+
+test("formal clean reviews supersede only strictly older pending comment evidence", () => {
+  const reviews = [{ id: 200, commit_id: headSha, state: "COMMENTED", user: codexUser, submitted_at: "2026-10-15T22:00:00Z" }];
+  for (const body of [stateBody.replace('"completed"', '"running"'), stateBody.replace('"code_review":', '"code_review":broken')]) {
+    for (const [updated_at, expected] of [["2026-10-15T21:30:00Z", "pass"], ["2026-10-15T22:00:00Z", "pending"], ["2026-10-15T23:00:00Z", "pending"]]) {
+      const comments = [{ ...summaryComment(body), updated_at }];
+      assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments], reviews })), expected);
+      assert.equal(runGate(comments, reviews).status, expected === "pass" ? 0 : 1);
+    }
+  }
+  const comments = [summaryComment(receiptBody + "\nExtra line.")];
+  assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments], reviews })), "pending", "formal proof never hides malformed receipt envelopes");
+});
+
+
+test("formal code approval cannot clear explicit structured code or security findings", () => {
+  const reviews = [{ id: 200, commit_id: headSha, state: "COMMENTED", user: codexUser, submitted_at: "2026-10-15T23:00:00Z" }];
+  for (const section of ["code_review", "security_review"]) {
+    for (const field of ["has_any_findings", "has_unresolved_findings"]) {
+      const body = (section === "security_review" ? withSecurityProof(stateBody) : stateBody).replace(new RegExp('("' + section + '":\\{[^}]*"' + field + '":)(?:false|null)'), '$1true');
+      const negative = summaryComment(body);
+      const comments = [negative];
+      assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments], reviews })), "pending", section + field);
+      assert.equal(runGate(comments, reviews).status, 1);
+      const laterReceipt = { ...summaryComment(receiptBody), created_at: "2026-10-15T22:00:00Z", updated_at: "2026-10-15T22:00:00Z" };
+      assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments, laterReceipt] })), "pending", "code receipt cannot revise explicit structured security/code findings");
+      comments.push({ ...summaryComment(stateBody.replace('"completed"', '"running"')), updated_at: "2026-10-15T22:00:00Z" });
+      assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments], reviews })), "pending", "a later pending summary cannot clear findings either");
+      comments.push({ ...summaryComment((section === "security_review" ? withSecurityProof(stateBody) : stateBody).replaceAll(answeredAt, "2026-10-15T22:30:00Z")), updated_at: "2026-10-15T22:30:00Z" });
+      assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, ...comments], reviews })), "pass", "newer affirmative structured proof clears the previous finding");
+    }
+  }
+});
+
+function withSecurityProof(body) {
+  const match = body.match(/codex-review-state:v1 (\{[^\r\n]*\}) -->/);
+  const state = JSON.parse(match[1]);
+  state.security_review = { ...state.code_review };
+  const row = body.match(/^\| 📝 \*\*Code Review\*\*.*$/m)?.[0];
+  return body.replace(match[1], JSON.stringify(state)).replace(row, row + "\n" + row.replace("📝 **Code Review**", "🛡️ **Security Review**"));
+}
+
+
+test("same-head repeated requests retain typed findings until matching newer machine proof", () => {
+  const repeatedAt = "2026-10-15T22:00:00Z";
+  const repeated = { ...command, id: 100, created_at: repeatedAt };
+  const reviews = [{ id: 200, commit_id: headSha, state: "COMMENTED", user: codexUser, submitted_at: "2026-10-15T23:00:00Z" }];
+  const answer = { ...summaryComment(receiptBody), created_at: "2026-10-15T23:00:00Z", updated_at: "2026-10-15T23:00:00Z" };
+  for (const section of ["code_review", "security_review"]) {
+    for (const field of ["has_any_findings", "has_unresolved_findings"]) {
+      const source = section === "security_review" ? withSecurityProof(stateBody) : stateBody;
+      const body = source.replace(new RegExp('("' + section + '":\\{[^}]*"' + field + '":)(?:false|null)'), '$1true');
+      const encodedNegative = body.match(/codex-review-state:v1 (\{[^\r\n]*\}) -->/)[1];
+      for (const formattedBody of [body + "\nOrdinary **Code Review** presentation.", body + "\n> ```html\n> " + body.match(/^\| 📝.*$/m)[0] + "\n> ```", body.replace("## Codex Review Summary", "  ## Codex Review Summary"), body + "\n<!-- codex-review-state:v1 {} -->", body + "\n<!-- codex-unknown -->", body + "\n<!-- CODEX-unknown -->", body + "\n<!-- CoDeX-unknown -->", body + "\n> ```html\n> <!-- codex-review-state:v1 {} -->\n> ```", body + "\n> > ```html\n> > <!-- codex-review-state:v1 {} -->\n> > ```", body + "\n```html\n<!-- codex-review-state:v1 example -->\n```", body + "\n~~~html\n<!-- codex-pull-request-review-summary -->\n~~~", body + "\n    <!-- codex-review-state:v1 example -->", body + "\n\t<!-- codex-pull-request-review-summary -->", body + "\nThe codex-review-state: parser has a defect.", "<!-- TODO -->\n" + body, body.replace(encodedNegative, JSON.stringify(JSON.parse(encodedNegative), null, 2)), body + "\n<!-- TODO -->", body.replace("<!-- codex-review-state:", "<!-- TODO -->\n<!-- codex-review-state:")]) {
+        const formatted = summaryComment(formattedBody);
+        assert.equal(runGate([repeated, formatted, answer], reviews).status, 1);
+        assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, formatted, answer], reviews })), "pending", "valid typed historical findings survive JSON whitespace and unrelated HTML comments");
+      }
+      const comments = [summaryComment(body), answer];
+      assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pending", section + field);
+      assert.equal(runGate([repeated, ...comments], reviews).status, 1);
+      const priorClean = { ...summaryComment(withSecurityProof(stateBody).replaceAll(answeredAt, "2026-10-15T21:30:00Z")), updated_at: "2026-10-15T21:30:00Z" };
+      assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, comments[0], priorClean] })), "pending", "historical clean proof alone cannot approve a new request");
+      if (section === "code_review") {
+        const row = priorClean.body.match(/^\| 🛡️ \*\*Security Review\*\*.*$/m)[0];
+        for (const inactive of [row.replace(/^\| /, ""), "> " + row.replace("Security Review", "Security&#32;Review")]) {
+          const edited = { ...comments[0], updated_at: "2026-10-15T23:30:00Z", body: comments[0].body.replace(/\s*<details>\s*<summary>ℹ️ About Codex in GitHub<\/summary>[\s\S]*<\/details>\s*$/, "") + "\n<details><summary>ℹ️ About Codex in GitHub</summary>\n" + inactive + "\n</details>" };
+          assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, edited, priorClean, answer], reviews })), "pending", "inactive rows in optional-pipe or quoted forms retain the edit clock");
+          assert.equal(runGate([repeated, edited, priorClean, answer], reviews).status, 1);
+        }
+        for (const label of ["Security&#32;Review", "Security&nbsp;Review", "Security<strong> </strong>Review"]) {
+          const edited = { ...comments[0], updated_at: "2026-10-15T23:30:00Z", body: comments[0].body + "\n" + row.replace("Security Review", label) };
+          assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, edited, priorClean, answer], reviews })), "pending", "rendered companion rows cannot borrow an old finding clock");
+          assert.equal(runGate([repeated, edited, priorClean, answer], reviews).status, 1);
+        }
+      }
+      {
+        const ownLabel = section === "code_review" ? "Code Review" : "Security Review";
+        const ownRow = priorClean.body.split("\n").find((line) => line.includes("**" + ownLabel + "**"));
+        const base = priorClean.body.replace(/\s*<details>\s*<summary>ℹ️ About Codex in GitHub<\/summary>[\s\S]*<\/details>\s*$/, "");
+        for (const value of [base + "\n<!--\n```\n-->\n" + ownRow, base.replace(ownRow, "") + "\n<details><summary>ℹ️ About Codex in GitHub</summary><details><summary>Inner</summary></details>\n" + ownRow + "\n</details>"]) {
+          const malformed = { ...priorClean, body: value };
+          assert.equal(runGate([repeated, ...comments, malformed], reviews).status, 1, "commented fences and nested details cannot hide duplicate or collapsed rows");
+        }
+      }
+      for (const indentation of ["", " ", "  ", "   "]) {
+        const row = priorClean.body.match(/^\| 🛡️ \*\*Security Review\*\*.*$/m)[0];
+        const duplicate = { ...priorClean, body: priorClean.body + "\n" + indentation + (indentation ? row : row.replace("Security Review", "Security&#32;Review")) };
+        assert.equal(runGate([repeated, ...comments, duplicate], reviews).status, 1);
+      }
+      for (const contradiction of ["P&#49; blocker", "\nP*1* blocker", "Do&#32;not&#32;merge", "P1 regression", "Found **1** issue", "Found &#49; issue", "Found issues.", "Security Review failed.", "<!-- CODEX-unknown -->", "<!-- CoDeX-unknown -->"]) {
+        comments.push({ ...priorClean, body: priorClean.body.replace("## Codex Review Summary", "## Codex Review Summary\n" + contradiction) });
+        assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pending", "contradictory historical presentation cannot clear findings");
+        assert.equal(runGate([repeated, ...comments], reviews).status, 1);
+        comments.pop();
+      }
+      {
+        const ownLabel = section === "code_review" ? "Code Review" : "Security Review";
+        const fenced = priorClean.body.split("\n").map((line) => line.includes("**" + ownLabel + "**") ? "```html\n" + line + "\n```" : line).join("\n");
+        const cleanWithoutFooter = priorClean.body.replace(/\s*<details>\s*<summary>ℹ️ About Codex in GitHub<\/summary>[\s\S]*<\/details>\s*$/, "");
+        const ownRow = cleanWithoutFooter.split("\n").find((line) => line.includes("**" + ownLabel + "**"));
+        const footerOnly = { ...priorClean, body: cleanWithoutFooter.split("\n").filter((line) => line !== ownRow).join("\n") + "\n<details><summary>ℹ️ About Codex in GitHub</summary>\n" + ownRow + "\n</details>" };
+        for (const tag of ["pre", "code", "div", "script", "style", "textarea", "table", "section", "article", "blockquote"]) {
+          const rawBlock = { ...priorClean, body: cleanWithoutFooter.split("\n").map((line) => line === ownRow ? "<" + tag + ">\n" + line + "\n</" + tag + ">" : line).join("\n") };
+          assert.equal(runGate([repeated, ...comments, rawBlock], reviews).status, 1, "raw HTML completion row cannot clear a finding");
+        }
+        const mismatchedClose = { ...priorClean, body: cleanWithoutFooter.split("\n").map((line) => line === ownRow ? "<details>\n</pre>\n" + line + "\n</details>" : line).join("\n") };
+        assert.equal(runGate([repeated, ...comments, mismatchedClose], reviews).status, 1, "unmatched raw closing tag cannot expose a hidden completion row");
+        const summaryDuplicate = { ...priorClean, body: cleanWithoutFooter + "\n<details><summary>" + ownRow.replace(/`[a-f0-9]{7,40}`/, "`fffffff`") + "</summary></details>" };
+        assert.equal(runGate([repeated, ...comments, summaryDuplicate], reviews).status, 1, "visible summary row counterevidence cannot clear a finding");
+        assert.equal(runGate([repeated, ...comments, footerOnly], reviews).status, 1);
+        comments.push({ ...priorClean, body: fenced });
+        assert.equal(runGate([repeated, ...comments], reviews).status, 1, "a fenced completion row cannot clear a finding");
+        assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pending", "a fenced completion row cannot clear a finding");
+        comments.pop();
+        const mismatched = priorClean.body.split("\n").map((line) => line.includes("**" + ownLabel + "**") ? line.replace(/`[a-f0-9]{7,40}`/, "`fffffff`") : line).join("\n");
+        comments.push({ ...priorClean, body: mismatched });
+        assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pending", "own-section row SHA must match typed current head");
+        assert.equal(runGate([repeated, ...comments], reviews).status, 1);
+        comments.pop();
+      }
+      comments.push(priorClean);
+      assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pass", "a repeated request does not resurrect a finding already cleared before it");
+      assert.equal(runGate([repeated, ...comments], reviews).status, 0);
+      comments.pop();
+      {
+        const encoded = priorClean.body.match(/codex-review-state:v1 (\{[^\r\n]*\}) -->/)[1];
+        const state = JSON.parse(encoded);
+        const other = section === "code_review" ? "security_review" : "code_review";
+        state[other].has_any_findings = true;
+        const label = other === "code_review" ? "Code Review" : "Security Review";
+        const scoped = { ...priorClean, body: priorClean.body.replace(encoded, JSON.stringify(state)).split("\n").map((line) => line.includes("**" + label + "**") ? line.replace("Manual request", "Manual request P1") : line).join("\n") };
+        const recoveryState = JSON.parse(encoded);
+        recoveryState[section] = { commit_sha: null, has_any_findings: null, has_unresolved_findings: null, status: null };
+        const ownLabel = section === "code_review" ? "Code Review" : "Security Review";
+        const recovery = { ...priorClean, updated_at: "2026-10-15T21:45:00Z", body: priorClean.body.replace(encoded, JSON.stringify(recoveryState)).split("\n").filter((line) => !line.includes("**" + ownLabel + "**")).join("\n").replaceAll("2026-10-15T21:30:00Z", "2026-10-15T21:45:00Z") };
+        comments.push(scoped, recovery);
+        assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pass", "severity in a validated other-section row does not discard independent clearing");
+        assert.equal(runGate([repeated, ...comments], reviews).status, 0);
+        comments.splice(-2);
+      }
+      for (const status of [null, "running"]) {
+        const encoded = priorClean.body.match(/codex-review-state:v1 (\{[^\r\n]*\}) -->/)[1];
+        const state = JSON.parse(encoded);
+        const other = section === "code_review" ? "security_review" : "code_review";
+        state[other] = { commit_sha: status ? state[other].commit_sha : null, has_any_findings: null, has_unresolved_findings: null, status };
+        const label = other === "code_review" ? "Code Review" : "Security Review";
+        const partial = { ...priorClean, body: priorClean.body.replace(encoded, JSON.stringify(state)).split("\n").flatMap((line) => !line.includes("**" + label + "**") ? [line] : status === "running" ? [line.replace("✅ **Completed**", "🔄 **Running** since")] : []).join("\n") };
+        comments.push(partial);
+        assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pass", "valid section-specific clearing survives a repeated request");
+        assert.equal(runGate([repeated, ...comments], reviews).status, 0);
+        comments.pop();
+        if (status === "running") {
+          const staleCompletedRow = priorClean.body.split("\n").find((line) => line.includes("**" + label + "**"));
+          comments.push({ ...partial, body: partial.body + "\n" + staleCompletedRow });
+          assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pending", "typed running cannot clear through a stale completed companion row");
+          assert.equal(runGate([repeated, ...comments], reviews).status, 1);
+          comments.pop();
+          const runningRow = priorClean.body.split("\n").find((line) => line.includes("**" + label + "**")).replace("✅ **Completed** ", "🔄 **Running** since ");
+          comments.push(partial);
+          assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pass", "a canonical running companion row preserves independent clearing");
+          assert.equal(runGate([repeated, ...comments], reviews).status, 0);
+          comments.pop();
+        }
+        const malformedOther = { ...partial, body: partial.body + "\n| " + (label === "Code Review" ? "📝" : "🛡️") + " **" + label + "** | ⚠️ Do not merge | `" + headSha.slice(0, 7) + "` | Manual request |" };
+        const firstCellWarning = { ...malformedOther, body: malformedOther.body.replace("| " + (label === "Code Review" ? "📝" : "🛡️") + " **" + label + "**", "| ⚠️ Do not merge " + (label === "Code Review" ? "📝" : "🛡️") + " **" + label + "**") };
+        comments.push(firstCellWarning);
+        assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pending", "a warning before the companion label cannot be ignored");
+        assert.equal(runGate([repeated, ...comments], reviews).status, 1);
+        comments.pop();
+        comments.push(malformedOther);
+        assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pending", "a noncanonical companion row cannot be discarded during clearing");
+        assert.equal(runGate([repeated, ...comments], reviews).status, 1);
+        comments.pop();
+      }
+      comments.push({ ...summaryComment(stateBody.replaceAll(answeredAt, "2026-10-15T23:30:00Z")), updated_at: "2026-10-15T23:30:00Z" });
+      assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), section === "security_review" ? "pending" : "pass", "null security is not security completion");
+      if (section === "security_review") {
+        for (const transform of [(body) => body.replace(/^\| 🛡️ \*\*Security Review\*\*.*$/m, ""), (body) => body.replace(/(🛡️ \*\*Security Review\*\*.*)/, (row) => row.replaceAll("2026-10-15T23:45:00Z", answeredAt))]) {
+          comments.push({ ...summaryComment(transform(withSecurityProof(stateBody).replaceAll(answeredAt, "2026-10-15T23:45:00Z"))), updated_at: "2026-10-15T23:45:00Z" });
+          assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pending", "missing or stale security completion cannot clear findings");
+        }
+      }
+      comments.push({ ...summaryComment(withSecurityProof(stateBody).replaceAll(answeredAt, "2026-10-16T00:00:00Z")), updated_at: "2026-10-16T00:00:00Z" });
+      assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pass");
+      assert.equal(runGate([repeated, ...comments], reviews).status, 0);
+      comments[0].updated_at = "2026-10-16T01:00:00Z";
+      assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pass", "unrelated summary edits cannot renew an older section finding");
+      const ownRowLabel = section === "code_review" ? "Code Review" : "Security Review";
+      const originalOwnRow = comments[0].body.split("\n").find((line) => line.includes("**" + ownRowLabel + "**"));
+      const duplicateAfterFooter = { ...comments[0], body: comments[0].body + "\n" + originalOwnRow };
+      assert.equal(runGate([repeated, duplicateAfterFooter, ...comments.slice(1)], reviews).status, 1, "original-body duplicate status row remains ambiguous after footer");
+      const hidden = { ...comments[0], body: comments[0].body.split("\n").map((line) => line.includes("**" + ownRowLabel + "**") ? "<!--\n" + line + "\n-->" : line).join("\n") };
+      assert.equal(runGate([repeated, hidden, ...comments.slice(1)], reviews).status, 1, "hidden completion row cannot reuse an older negative clock");
+      for (const tag of ["script", "style", "textarea"]) {
+        const rawNegative = { ...comments[0], body: comments[0].body.split("\n").map((line) => line.includes("**" + ownRowLabel + "**") ? "<" + tag + ">\n" + line + "\n</" + tag + ">" : line).join("\n") };
+        assert.equal(runGate([repeated, rawNegative, ...comments.slice(1)], reviews).status, 1, "typed finding with raw HTML clock uses observed update time");
+      }
+      const unterminated = { ...hidden, body: hidden.body.replace(/\n-->\n/g, "\n") };
+      assert.equal(runGate([repeated, unterminated, ...comments.slice(1)], reviews).status, 1);
+      for (const visibleNegative of ["Bug found.", "Some problems remain.", "An issue was detected.", "<!-->P1", "<!--->P1", "<div>\nDo&nbsp not&nbsp merge\n</div>", "There is a bug.","<details><summary>ℹ️ About Codex in GitHub</summary>\n\nDo [not] merge\n[not]:\n  https://example.com\n</details>", "[safe][P1 blocker]\n[P1 blocker]:\n\nhttps://example.com", "<details><summary>ℹ️ About Codex in GitHub</summary>\n> ~~~\n> [safe](P1)\n> ~~~\n</details>", "<details><summary>ℹ️ About Codex in GitHub</summary>\n>     [safe](P1)\n</details>", "<details><summary>ℹ️ About Codex in GitHub</summary>Ordinary footer</details>\nSecurity Review | ⚠️ Failed\n</details>", "[safe [inner](url)](P1)", "`<P1> blocker`", "```text\n<P1> blocker\n```", "<details><summary>ℹ️ About Codex in GitHub</summary>\n    [safe](P1)\n</details>", "<P1?> blocker", "[safe\\]( P1)", "<details><summary>ℹ️ About Codex in GitHub</summary>\n`[safe](P1)`\n</details>", "<details><summary>ℹ️ About Codex in GitHub</summary>\n```text\n[safe](P1)\n```\n</details>", "<details><summary>ℹ️ About Codex in GitHub</summary>\n<code>[safe](P1)</code>\n</details>", "<details><summary>ℹ️ About Codex in GitHub</summary>\n<pre>\n[safe](P1)\n</pre>\n</details>", "<details><summary>ℹ️ About Codex in GitHub</summary>\nFound issues.\n</details>", "<details><summary>ℹ️ About Codex in GitHub</summary>\nSecurity review failed.\n</details>", "<details><summary>ℹ️ About Codex in GitHub</summary>\nReview pending.\n</details>", "<details><summary>ℹ️ About Codex in GitHub</summary>\nChanges requested.\n</details>", "<details><summary>ℹ️ About Codex in GitHub</summary>\n\nDo [not](https://example.com \"title\") merge\n</details>", "<details><summary>ℹ️ About Codex in GitHub</summary>\n\nDo [not](https://example.com 'title') merge\n</details>", "<details><summary>ℹ️ About Codex in GitHub</summary>\n\nDo [not](https://example.com (title)) merge\n</details>", "<details><summary>ℹ️ About Codex in GitHub</summary>\nDo <span title=\"&#34;>\">not</span> merge\n</details>", "<details><summary>ℹ️ About Codex in GitHub</summary>\n<!--[x](foo-->P1)\n</details>", "<details><summary>ℹ️ About Codex in GitHub</summary>\n[safe][P1 blocker]\n</details>", "<details><summary>ℹ️ About Codex in GitHub</summary>\n\nDo [not][] merge\n[not]: https://example.com\n</details>", "<details><summary>ℹ️ About Codex in GitHub</summary>\n\nDo [not] merge\n[not]: https://example.com\n</details>", "<details><summary>ℹ️ About Codex in GitHub</summary>Do <span title=\">\">not</span> merge</details>", "<details><summary>ℹ️ About Codex in GitHub</summary>\n\nDo [not](https://example.com/(x)) merge</details>", "P&#49; blocker", "\nP*1* blocker", "Do&#32;not&#32;merge", "Found **1** issue", "Found &#49; issue", "Found P1 issues.", "Security review failed."]) {
+        const edited = { ...comments[0], body: comments[0].body + "\n" + visibleNegative };
+        assert.equal(runGate([repeated, edited, ...comments.slice(1)], reviews).status, 1, "new visible negative evidence uses update time: " + visibleNegative);
+        const recovery = { ...summaryComment(withSecurityProof(stateBody).replaceAll(answeredAt, "2026-10-16T02:00:00Z")), updated_at: "2026-10-16T02:00:00Z" };
+        assert.equal(runGate([repeated, edited, ...comments.slice(1), recovery], reviews).status, 0, "newer canonical completion clears edited explicit findings");
+      }
+      if (section === "code_review") {
+        const original = comments[0].body;
+        const encoded = original.match(/codex-review-state:v1 (\{[^\r\n]*\}) -->/)[1];
+        const state = JSON.parse(encoded);
+        state.security_review = { commit_sha: headSha, has_any_findings: null, has_unresolved_findings: null, status: "running" };
+        comments[0].body = original.replace(encoded, JSON.stringify(state));
+        assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pending", "new running security state retains update-time ordering");
+        comments[0].body = original;
+      }
+      assert.equal(runGate([repeated, ...comments], reviews).status, 0);
+    }
+  }
+});
+
+test("historical malformed and foreign-head state cannot become persistent finding vetoes", () => {
+  const repeatedAt = "2026-10-15T22:00:00Z";
+  const repeated = { ...command, id: 100, created_at: repeatedAt };
+  const reviews = [{ id: 200, commit_id: headSha, state: "COMMENTED", user: codexUser, submitted_at: "2026-10-15T23:00:00Z" }];
+  const answer = { ...summaryComment(receiptBody), created_at: "2026-10-15T23:00:00Z", updated_at: "2026-10-15T23:00:00Z" };
+  const negative = stateBody.replace('"has_any_findings":false', '"has_any_findings":true');
+  const securityNegative = withSecurityProof(stateBody).replace(/("security_review":\{[^}]*"has_any_findings":)false/, "$1true");
+  for (const body of [securityNegative.replace(/^\| 🛡️ \*\*Security Review\*\*.*$/m, ""), securityNegative.replace(/(🛡️ \*\*Security Review\*\*.*datetime=")[^"]+/, "$1invalid")]) {
+    assert.equal(runGate([repeated, summaryComment(body), answer], reviews).status, 1, "typed negative retains authority with an invalid visual clock");
+  }
+  for (const body of [negative.replace(/^<!--/, "    \uFEFF<!--"), "\uFEFF" + negative.replace(/^<!--/, "    <!--"), "\uFEFF" + negative.replace(/^<!--/, "\t<!--"), negative.replace(/^<!--/gm, "    <!--"), negative.replace(/^<!--/gm, "\t<!--"), negative.replace(/^(<!-- codex-review-state:)/m, "    $1"), "```json\n" + negative + "\n```", negative.split("\n").map((line) => "> " + line).join("\n"), negative.replace('state:v1', 'state:v2'), negative.replace('"code_review":', '"code_review":broken'), negative.replace('"code_review":', '"code_review":{},"code_review":'), negative.replace("## Codex Review Summary", "<!-- codex-unknown -->\n## Codex Review Summary"), negative.replace("## Codex Review Summary", "<!-- CODEX-unknown -->\n## Codex Review Summary"), negative.replace("## Codex Review Summary", "<!-- CoDeX-unknown -->\n## Codex Review Summary"), negative.replaceAll(headSha, "f".repeat(40)).replaceAll(headSha.slice(0, 7), "f".repeat(7))]) {
+    const comments = [summaryComment(body), answer];
+    assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [repeated, ...comments], reviews })), "pass", body);
+    assert.equal(runGate([repeated, ...comments], reviews).status, 0);
+  }
+});
+
+test("case-variant accepted receipts are discovered by the executed gate", () => {
+  for (const body of [receiptBody.toUpperCase(), receiptBody.replaceAll("Codex", "cOdEx").replaceAll("codex-", "CoDeX-")]) {
+    const value = summaryComment(body);
+    assert.equal(isAcceptableCodexSummaryComment(value, headSha, requestedAt, "10"), true);
+    assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, value] })), "pass");
+    assert.equal(runGate([value]).status, 0);
+  }
+});
+
+test("case-variant unfamiliar receipts follow independent machine chronology", () => {
+  const opaque = summaryComment(receiptBody.replace(":rocket:", "A whimsical flourish.").toUpperCase());
+  const later = { ...summaryComment(stateBody.replaceAll(answeredAt, "2026-10-15T22:00:00Z")), updated_at: "2026-10-15T22:00:00Z" };
+  assert.equal(runGate([opaque]).status, 1);
+  assert.equal(runGate([opaque, later]).status, 0);
+  const tied = { ...opaque, created_at: later.updated_at, updated_at: later.updated_at };
+  assert.equal(runGate([tied, later]).status, 1);
+  assert.equal(runGate([{ ...tied, updated_at: "2026-10-15T23:00:00Z" }, later]).status, 1);
+  assert.equal(runGate([{ ...opaque, body: opaque.body + "\nCODEX REVIEW: duplicate" }, later]).status, 1);
+});
+
+
+test("validated reference definitions remain non-rendered while code and invalid text stay visible", () => {
+  const hidden = stateBody.replace(/^(\| 📝[^\n]+)$/m, "<div\nclass=x>\n$1\n</div>");
+  assert.equal(runGate([summaryComment(hidden)]).status, 1, "multiline raw HTML opener hides the completion row");
+  for (const suffix of ["\nRegression tests passed.", "\nOne regression test passed.", "\nOne defect report was closed.", "\nFixed one issue.", "\nThis change introduces no bugs.", "\nThis change never introduces a bug.", "\nNo issues were found except one already fixed.", "\nIssues do not exist.", "\nBugs do not remain.", "\nNo findings are pending.", "\nNo issues remain unresolved.", "\nDo&solnot merge", "\n`Do&sol;not merge`", "\n[safe](<https://example.test/a b>)", "\nAn eliminated issue was documented.", "\nThe issue is harmless.", "\nThe issue is benign.", "\nSecurity issues: none were found.", "\nSecurity issues: none are outstanding.", "\nSecurity issue: none currently exist.", "\nSecurity issue: none were found.", "\nNo issues were found except one, which was fixed.", "\nFound 1 fixed issue.", "\nSecurity issues: none found.", "\nSecurity issue: none exist.", "\nSecurity issues: zero outstanding.", "\nNo<caption>An issue remains</caption>", "\nNo<legend>An issue remains</legend>", "\nFound issues: zero", "\nIssues found: zero", "\nNo security issues found", "\n\n[safe]: P1", "\nThis is not an issue.", "\nThat is a bug that was fixed.", "\nSecurity issue: none", "\nSecurity issue: was fixed.", "\nNo issues or findings were found.", "\nA security issue got eliminated.", "\nNo code or security issues were found.", "\nThe word issues is emphasized.", "\n<div>Found **0** issues</div>", "\nThis is not an issue.", "\nNo longer an issue.", "\nThis isn't a bug.", "\nThis is not considered a bug.", "\nThis is a bug-free change.", "\nFound\n\nan issue.", "\n\nparagraph\n<span>\n[safe](P1)", "\nP_1", "\nP*1", "\nP_1_", "\n`P*1*`", "\n\n[safe]: /url\n  \"title [^note]\"\n[^note]: P1", "\n\nDo&nbsp not&nbsp merge", "\n\n`Do&nbsp not&nbsp merge`", "\n\n[safe](https://example.test/[^note])\n\n[^note]: P1 example", "\n\n<span title=\"[^note]\">safe</span>\n\n[^note]: P1 example", "\n\nnote[^bad label]\n\n[^bad label]: P1", "\n\n[^doc]: safe\n  P1", "\n\n[^doc]: safe\n    P1", "\n\n> <div>\n[safe](P1)", "\n\n- <div>\n\n[safe](P1)", "\n<div>\n<img / P1>\n</div>", "\n\n[^doc]: P1", "\n<div>\n</span P1>\n</div>", "\n\n<span>P&#49</span> blocker", "\n\n`P&#49 blocker`", "\nFound no bugs.", "\nFound 0 bugs.", "\nFound <em>no</em> issues.", "\nFound `0` issues.", "\n\n[doc]:https://example.test/P1", "\n\n[doc]:\n  https://example.test/P1"]) {
+    const state = summaryComment(stateBody + suffix);
+    assert.equal(runGate([state]).status, 1, "noncanonical prose remains pending: " + suffix);
+  }
+  for (const suffix of ["\nThe security issue does not exist locally but remains in production.", "\nA security issue is already fixed in tests but exploitable in production.", "\nThe issue does not remain fixed.", "\nNo issues were found except one already fixed that has reappeared.", "\nA bug must be fixed.", "\n[safe](https://example.com \"P1 blocker\"\n\n)", "\nThis change introduces a bug.", "\nThe change creates a security issue.", "\nThis change contains a vulnerability.", "\nThis change has a defect.", "\nCritical security issue remains.", "\nAuthentication vulnerability exists.", "\nAn eliminated issue reappeared.", "\nAn eliminated issue has reappeared.", "\nA resolved issue has reappeared.", "\nA fixed bug recurred.", "\nThe security issue is harmless in tests but exploitable in production.", "\nMost issues remain.", "\nEvery issue remains.", "\nNumerous issues remain.", "\n[safe](https://example.com\n\n\"P1 blocker\")", "\nA defect remains.", "\nA regression remains.", "\n[P1](<https://example.test/a b>)", "\nDo&sol;not merge", "\nBoth issues remain.", "\nMany issues remain.", "\nAll issues remain unresolved.", "\nThe bug still exists.", "\nThere still is a bug.", "\nWe have one security issue.", "\nA security issue<br>was found.", "\nOne issue persists.", "\nNo issues were found except two.", "\nAn eliminated issue may reappear.", "\nA resolved issue could recur.", "\nThe issue allows code execution.", "\nAn issue can expose secrets.", "\nThe vulnerability is exploitable.", "\nNo issues or findings were found\u2014except one.", "\nAn eliminated issue was found again.", "\nThis eliminated issue persists.", "\nA security flaw was found.", "\nTwo security issues were found.", "\n> safe\n<span>\n[safe](P1)", "\n- safe\n<span>\n[safe](P1)", "\n<div\nclass=x>\n[safe](P1)", "\nNo<center>An issue remains</center>", "\nThis is an issue.", "\nThat is a bug.", "\nSecurity issue—authentication bypass.", "\nSecurity issue: no authentication.", "\nSecurity issue: no workaround.", "\nA vulnerability was detected.", "\nA security issue has gotten flagged.", "\nA security issue had gotten flagged.", "\nSecurity issue: authentication bypass.", "\nA security issue: was flagged.", "\nThis issue is not resolved.", "\nIssues persist.", "\nFindings are outstanding.", "\nNo code changes were needed and one security issue remains.", "\nA security issue got flagged.", "\nOne security issue was identified", "\nMultiple security issues remain", "\n1 issue: zero", "\nA bug is present", "\nA problem persists", "\nAn issue is outstanding", "\n\n    code\n<span>\n[safe](P1)", "\nNo code issues: 1 security issue found", "\nFound an issue that is not yet resolved.", "\nThis is not safe because there is a bug.", "\nFound 1,000 issues.", "\n1 bug is not fixed", "\nThere is an issue that was not resolved", "\n<div>Found **1** issue</div>", "\nBug found.", "\nOne issue found.", "\nMultiple findings remain.", "\nAn issue was detected.", "\nSeveral issues were detected.", "\nSome problems remain.", "\n\nparagraph\n\n<span>\n[safe](P1)", "\n\nP**1**", "\n\n**P1**", "\n\nDo [not][ẞ] merge\n[ss]: https://example.com", "\n<!-->P1", "\n<!--->P1", "\n<div>\nDo&nbsp not&nbsp merge\n</div>", "\nThere is a bug.", "\n\nnote[^SS]\n\n[^ß]: P1 blocker", "\n\nroot[^a]\n\n[^a]: safe [^b]\n[^b]: P1", "\n\nnote[^doc]\n\n[^doc]: safe\n  P1", "\n\nnote[^doc]\n\n[^doc]: safe\n    P1", "\n\n[^bad label]: P1 blocker", "\n\n<span P1?>safe</span>", "\n\nnote[^DOC]\n\n[^doc]: P1", "\n\n<img / P1>", "\n\n<img =P1>", "\n\nnote[^doc]\n\n[^doc]: P1", "\n[safe](" + "(".repeat(33) + "P1" + ")".repeat(33) + ")", "\n\n</span P1>", "\nThere is an issue.", "\n> <div>\n> [safe](P1)\n> </div>", "\n- <div>\n  [safe](P1)\n  </div>", "\nFound 0 code issues and 1 security issue.", "\n<div>\nP&#49 blocker\n</div>", "\n<details><summary>ℹ️ About Codex in GitHub</summary>\nP&#49 blocker\n</details>", "\n[doc]: P1)", "\n[foo[bar]:https://example.test/P1", "\n<div>\n[safe](P1)\n</div>", "\n[safe\n\nlabel](P1)", "\n`[doc]:https://example.test/P1`", "\n[doc]:\n\nhttps://example.test/P1"]) {
+    const state = summaryComment(stateBody + suffix);
+    assert.equal(runGate([state]).status, 1, suffix);
+  }
+});
+
+test("section warning edits do not renew a cleared companion finding", () => {
+  const requestTime = "2026-10-15T21:40:00Z";
+  const codeTime = "2026-10-15T21:01:00Z";
+  const codeClearTime = "2026-10-15T21:30:00Z";
+  const securityTime = "2026-10-15T21:59:00Z";
+  const securityClearTime = "2026-10-15T22:10:00Z";
+  const snapshot = (codeFinding, securityFinding, codeAt, securityAt, codeTrigger = "Manual request", securityTrigger = "Manual request") => {
+    const value = (finding) => ({ commit_sha: headSha, has_any_findings: finding, has_unresolved_findings: finding, status: "completed" });
+    const state = { code_review: value(codeFinding), security_review: securityFinding === null ? { commit_sha: null, has_any_findings: null, has_unresolved_findings: null, status: null } : value(securityFinding) };
+    const row = (label, icon, at, trigger) => `| ${icon} **${label}** | ✅ **Completed** <relative-time datetime="${at}">${at}</relative-time> | \`${headSha.slice(0, 7)}\` | ${trigger} |`;
+    return `<!-- codex-pull-request-review-summary -->\n<!-- codex-review-state:v1 ${JSON.stringify(state)} -->\n\n## Codex Review Summary\n\n${row("Code Review", "📝", codeAt, codeTrigger)}${securityFinding === null ? "" : "\n" + row("Security Review", "🛡️", securityAt, securityTrigger)}`;
+  };
+  const make = (body, at) => ({ ...summaryComment(body), updated_at: at });
+  const codeClear = make(snapshot(false, null, codeClearTime), codeClearTime);
+  const securityClear = make(snapshot(false, false, codeClearTime, securityClearTime), securityClearTime);
+  const answer = { ...summaryComment(receiptBody), id: 200, created_at: "2026-10-15T22:20:00Z", updated_at: "2026-10-15T22:20:00Z" };
+  const negative = make(snapshot(true, true, codeTime, securityTime, "Manual request", "P1 security issue"), "2026-10-15T22:00:00Z");
+  for (const example of ["`<summary>Security Review</summary>`", "```html\n<summary>Security Review</summary>\n``` "]) {
+    const exampleClear = {...securityClear, body: securityClear.body + "\n" + example};
+    assert.equal(runGate([{...command,id:100,created_at:requestTime},negative,codeClear,exampleClear,answer]).status, 1, "noncanonical literal example cannot independently clear a finding");
+  }
+  const pendingTime = "2026-10-15T22:00:00Z";
+  const pendingProse = make(snapshot(false, false, pendingTime, pendingTime) + "\nP1: defect", pendingTime);
+  const freshTime = "2026-10-15T22:15:00Z";
+  const freshClean = make(snapshot(false, false, freshTime, freshTime), freshTime);
+  const missingCompanion = {...negative, body: negative.body.split("\n").filter(line => !line.includes("**Security Review**")).join("\n")};
+  assert.equal(runGate([{...command,id:100,created_at:requestTime},missingCompanion, codeClear, securityClear, answer]).status, 1, "missing non-absent companion row requires observed negative time");
+  assert.equal(runGate([{...command,id:100,created_at:requestTime},missingCompanion, codeClear, securityClear, freshClean, answer]).status, 0, "newer own-section completion can recover missing companion observation");
+  const carriedSecurity = {...freshClean, created_at: freshTime, body: snapshot(false, false, freshTime, codeTime)};
+  assert.equal(runGate([{...command,id:100,created_at:requestTime},carriedSecurity]).status, 0, "fresh code approval may carry an older coherent security completion");
+  for (const label of ["Code Review", "Security Review"]) {
+    const emoji = label === "Code Review" ? "📝" : "🛡️";
+    const malformed = {...freshClean, body: freshClean.body.replace("| " + emoji + " **" + label + "** |", "| ⚠️ **" + label + "** |")};
+    assert.equal(runGate([{...command,id:100,created_at:requestTime},malformed]).status, 1, "warning-bearing section label cannot approve: " + label);
+  }
+  for (const label of ["Code Review", "Security Review"]) {
+    const row = freshClean.body.split("\n").find(line => line.startsWith("|") && line.includes("**" + label + "**"));
+    for (const extra of [row.replace("Manual request |", "Manual request | extra |"), row.replace("**" + label + "**", "[" + label.split(" ")[0] + "](https://example.test) Review").replace(headSha.slice(0, 7), "bbbbbbb")]) {
+      const malformed = {...freshClean, body: extra.includes("extra") ? freshClean.body.replace(row, extra) : freshClean.body + "\n" + extra};
+      assert.equal(runGate([{...command,id:100,created_at:requestTime},malformed]).status, 1, "malformed or rendered duplicate section row cannot approve: " + label);
+    }
+  }
+  const runProse = (values) => runGate([{ ...command, id: 100, created_at: requestTime }, ...values]);
+  assert.equal(runProse([pendingProse]).status, 1, "raw contradiction cannot itself approve");
+  assert.equal(runProse([pendingProse, freshClean]).status, 0, "newer strict machine completion supersedes older pending prose under this repository contract");
+
+  const run = (edited) => runGate([{ ...command, id: 100, created_at: requestTime }, edited, codeClear, securityClear, answer]);
+  assert.equal(run(negative).status, 0, "validated security warning cannot renew the old code finding after code clear");
+  const carriedClear = {...securityClear, created_at: securityClearTime};
+  assert.equal(runGate([{...command, id:100, created_at:requestTime}, negative, codeClear, carriedClear, answer]).status, 0, "a valid security completion may carry an older code clock without granting code authority");
+  for (const finding of ["Users can bypass authentication.", "The review mentioned a bug that has not been fixed.", "The review mentioned a bug that is still open.", "It is possible to bypass authentication.", "The mentioned vulnerability allows code execution.", "The discussed vulnerability is exploitable.", "Users can trivially bypass authentication.", "The review mentioned a bug that is open.", "We discussed a vulnerability that is outstanding.", "Can bypass authentication without credentials.", "Users are able to bypass authentication.", "One bug fix remains incomplete.", "The review mentioned a bug that remains.", "We discussed a bug that persists.", "The review mentioned an issue that remains unresolved.", "We discussed a bug that remains open.", "The application is vulnerable to SQL injection.", "Authentication can be bypassed.", "I see a bug.", "We identify an issue.", "This change introduces multiple bugs.", "This change contains some issues.", "This change has several regressions.", "This change causes a regression.", "This patch exposes a vulnerability.", "A security risk remains.", "The security issue does not exist locally but remains in production.", "A security issue is already fixed in tests but exploitable in production.", "The issue does not remain fixed.", "No issues were found except one already fixed that has reappeared.", "A bug must be fixed.", "This change introduces a bug.", "The change creates a security issue.", "This change contains a vulnerability.", "This change has a defect.", "Critical security issue remains.", "Authentication vulnerability exists.", "An eliminated issue reappeared.", "An eliminated issue has reappeared.", "A resolved issue has reappeared.", "A fixed bug recurred.", "The security issue is harmless in tests but exploitable in production.", "Most issues remain.", "Every issue remains.", "Numerous issues remain.", "A defect remains.", "A regression remains.", "[P1](<https://example.test/a b>)", "Do&sol;not merge", "Both issues remain.", "Many issues remain.", "All issues remain unresolved.", "The bug still exists.", "There still is a bug.", "We have one security issue.", "A security issue<br>was found.", "One issue persists.", "No issues were found except two.", "An eliminated issue may reappear.", "A resolved issue could recur.", "The issue allows code execution.", "An issue can expose secrets.", "The vulnerability is exploitable.", "No issues or findings were found\u2014except one.", "An eliminated issue was found again.", "This eliminated issue persists.", "A security flaw was found.", "Two security issues were found.", "This is an issue.", "That is a bug.", "Security issue—authentication bypass.", "Security issue: no authentication.", "Security issue: no workaround.", "A vulnerability was detected.", "A security issue has gotten flagged.", "A security issue had gotten flagged.", "Security issue: authentication bypass.", "A security issue: was flagged.", "This issue is not resolved.", "Issues persist.", "Findings are outstanding.", "No code changes were needed and one security issue remains.", "A security issue got flagged.", "A bug is present", "A problem persists", "An issue is outstanding"]) {
+    const edited = { ...negative, body: negative.body + "\n<details><summary>ℹ️ About Codex in GitHub</summary>About</details>\n" + finding };
+    assert.equal(run(edited).status, 1, "indefinite finding after actual About footer retains observation time: " + finding);
+    if (["[P1](<https://example.test/a b>)", "Do&sol;not merge", "Both issues remain.", "Many issues remain.", "All issues remain unresolved.", "The bug still exists.", "There still is a bug.", "We have one security issue.", "A security issue<br>was found.", "One issue persists.", "No issues were found except two.", "An eliminated issue may reappear.", "A resolved issue could recur.", "The issue allows code execution.", "An issue can expose secrets.", "The vulnerability is exploitable.", "No issues or findings were found\u2014except one.", "An eliminated issue was found again.", "This eliminated issue persists.", "A security flaw was found.", "Two security issues were found.", "This is an issue.", "That is a bug."].includes(finding)) {
+      const recoveryTime = "2026-10-15T22:15:00Z";
+      const recovery = make(snapshot(false, false, recoveryTime, recoveryTime), recoveryTime);
+      assert.equal(runGate([{ ...command, id: 100, created_at: requestTime }, edited, codeClear, securityClear, recovery, answer]).status, 0, "strictly newer same-section canonical completion clears nominal finding");
+    }
+  }
+  for (const benign of ["The review mentioned a bug fix.", "We discussed a bug.", "Users cannot bypass authentication.", "No users can bypass authentication.", "Neither user can bypass authentication.", "None can bypass authentication.", "A security issue was not found.", "None of the findings remain.", "Nobody can bypass authentication.", "No unauthenticated users can bypass authentication.", "The review mentioned a bug that remains fixed.", "We discussed a bug that remains resolved.", "The review mentioned an issue that remains closed.", "The application is not vulnerable to SQL injection.", "Authentication cannot be bypassed.", "We fix an issue.", "We prevent a bug.", "This change prevents a bug.", "This change avoids a regression.", "This change mitigates an issue.", "This change fixes a bug.", "This change resolves an issue.", "A business risk remains.", "No security risks remain.", "The security risk was resolved.", "Regression tests passed.", "One regression test passed.", "One defect report was closed.", "Fixed one issue.", "This change introduces no bugs.", "This change never introduces a bug.", "No issues were found except one already fixed.", "Issues do not exist.", "Bugs do not remain.", "No findings are pending.", "No issues remain unresolved.", "An eliminated issue was documented.", "The issue is harmless.", "The issue is benign.", "Security issues: none were found.", "Security issues: none are outstanding.", "Security issue: none currently exist.", "Security issue: none were found.", "No issues were found except one, which was fixed.", "Found 1 fixed issue."]) {
+    const edited = { ...negative, body: negative.body + "\n<details><summary>ℹ️ About Codex in GitHub</summary>About</details>\n" + benign };
+    assert.equal(run(edited).status, 1, "unrecognized prose retains observation time regardless of apparent meaning: " + benign);
+  }
+  const contradictoryClean = make(snapshot(true, false, codeTime, securityTime, "Manual request", "P1 security issue"), "2026-10-15T22:00:00Z");
+  assert.equal(run(contradictoryClean).status, 1, "false/false companion cannot hide a contradictory original trigger");
+  assert.equal(run({ ...negative, body: negative.body + "\nP1 global blocker" }).status, 1, "global warning cannot be assigned to the other section");
+  assert.equal(run({ ...negative, body: negative.body.replace("Manual request |", "P1 own blocker |") }).status, 1, "own warning retains observation time");
+  assert.equal(run({ ...negative, body: negative.body.replace("P1 security issue |", "P1 | malformed |") }).status, 1, "malformed counterpart row cannot scope a warning");
+});
+
+
+test("bracket-heavy comments normalize without repeated impossible-link scans", async () => {
+  const { containsBlockingCodexSeverity } = await import("../scripts/codex-review-helpers.mjs");
+  const started = performance.now();
+  assert.equal(containsBlockingCodexSeverity("[".repeat(65000)), false);
+  assert.equal(containsBlockingCodexSeverity("[".repeat(65000) + " P1 blocker"), true);
+  assert.equal(containsBlockingCodexSeverity("[".repeat(65000) + "]"), false);
+  assert.ok(performance.now() - started < 5000, "near-limit bracket text must not exhaust the review gate");
+});
+
+
+test("completion clocks cannot predate their carrying comment", () => {
+  const at = (minute) => `2026-10-15T21:${minute}:00Z`;
+  const snapshot = (minute, created, finding = false) => ({
+    ...summaryComment(stateBody.replaceAll(answeredAt, at(minute)).replace('"has_any_findings":false', '"has_any_findings":' + finding).replace('"has_unresolved_findings":false', '"has_unresolved_findings":' + finding)),
+    created_at: at(created), updated_at: at(created > minute ? created : minute)
+  });
+  const negative = snapshot("10", "12", true);
+  const intervening = snapshot("11", "01");
+  const answer = {...summaryComment(receiptBody), created_at: at("14"), updated_at: at("14")};
+  const execute = (items) => runGate(items);
+  assert.equal(execute([negative, intervening, answer]).status, 1, "pre-creation row must use the negative observation time");
+  assert.equal(execute([negative, intervening, snapshot("13", "01"), answer]).status, 0, "strictly newer genuine completion recovers");
+  assert.equal(execute([snapshot("10", "12")]).status, 1, "pre-creation clean clock cannot approve");
+});
+
+
+test("explicit qualified security risk cannot approve clean state", () => {
+  const state = summaryComment(stateBody + "\nA security risk remains.");
+  assert.equal(runGate([state]).status, 1);
+});
+
+
+test("ordinary backtick spans normalize without repeated suffix copies", async () => {
+  const { containsBlockingCodexSeverity } = await import("../scripts/codex-review-helpers.mjs");
+  const text = "`x` ".repeat(16000);
+  const started = performance.now();
+  assert.equal(containsBlockingCodexSeverity(text), false);
+  assert.equal(containsBlockingCodexSeverity(text + " P1 blocker"), true);
+  assert.ok(performance.now() - started < 5000, "near-limit ordinary code spans must not exhaust the review gate");
+});
+
+
+test("closer-only emphasis runs avoid scanning ineligible delimiter prefixes", async () => {
+  const { containsBlockingCodexSeverity } = await import("../scripts/codex-review-helpers.mjs");
+  const started = performance.now();
+  const prose = "a_ ".repeat(21000);
+  assert.equal(containsBlockingCodexSeverity(prose), false);
+  assert.equal(containsBlockingCodexSeverity(prose + " P1 blocker"), true);
+  assert.ok(performance.now() - started < 5000);
+});
+
+
+test("negative subjects do not assert authentication bypass", () => {
+  assert.equal(runGate([command, summaryComment(stateBody + "\nNobody can bypass authentication.")]).status, 1);
+});
+
+
+test("copular active findings survive informational mentions", () => {
+  for (const suffix of ["The review mentioned a bug that is open.", "We discussed a vulnerability that is outstanding."]) {
+    assert.equal(runGate([command, summaryComment(stateBody + "\n" + suffix)]).status, 1);
+  }
+});
+
+
+test("active predicates survive adjectival mentions and modal adverbs", () => {
+  for (const suffix of ["The mentioned vulnerability allows code execution.", "The discussed vulnerability is exploitable.", "Users can trivially bypass authentication."]) {
+    assert.equal(runGate([command, summaryComment(stateBody + "\n" + suffix)]).status, 1);
+  }
+});
+
+
+test("qualified absence and current finding state retain their own polarity", () => {
+  for (const [suffix, expected] of [["The review mentioned a bug that has not been fixed.", 1], ["The review mentioned a bug that is still open.", 1], ["It is possible to bypass authentication.", 1], ["Neither user can bypass authentication.", 0], ["None can bypass authentication.", 0], ["A security issue was not found.", 0], ["None of the findings remain.", 0]]) {
+    assert.equal(runGate([command, summaryComment(stateBody + "\n" + suffix)]).status, 1, "closed presentation: " + suffix);
+  }
 });

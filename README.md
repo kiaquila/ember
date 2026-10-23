@@ -42,15 +42,67 @@ cannot renew it. P0–P2 findings and every unresolved Codex review thread block
 success, even after another request. The gate rechecks HEAD after reading evidence.
 
 The rerun workflow reads trusted policy from the default branch and routes native
-formal reviews plus created/edited receipt and summary comments. The
-`codex-pull-request-review-summary` / `codex-review-state:v1` HTML is a wakeup
-signal only: neither its JSON, a Completed label nor a thumbs-up grants success.
-Reruns wait for an active gate and coalesce events already read by a later attempt.
+reviews and created/edited summary comments. Version 1 structured state now offers
+independent evidence: the official bot must report the full current head,
+`code_review.status: "completed"` and both finding flags exactly `false`.
+`security_review` must be all `null`, or the same exact-head completed/false/false
+state. Both objects have exactly four required fields; malformed JSON, duplicate
+keys, extra fields, unknown markers and versions fail closed. A fresh state update
+must follow the current trusted request, with IDs ordering same-second events.
+Newer non-clean state supersedes older clean state, including pending, malformed
+and wrong-head updates; ambiguous equal-time summaries fail closed.
 
-When this routing fix is itself under review, the default branch still has the
-old event filter. After the native connector posts a real current-head receipt,
-a maintainer can rerun the existing `Codex Review` Actions run with `gh run rerun
-<run-id> --repo kiaquila/ember`. The old trusted parser already accepts that
-receipt. This evaluates real review evidence using default-branch code; do not
-change checkout trust, fabricate a status, or merge around a failed gate. Once
-merged, subsequent native events use the corrected routing automatically.
+This intentionally replaces the old wakeup-only treatment of structured state
+with an independent machine verdict and explicit chronology. Every unfamiliar
+receipt is pending, whether its prose appears positive or negative; a strictly
+newer affirmative machine completion independently supersedes that unstructured
+text. Later or same-second unfamiliar text requires a fresh completion. The
+legacy receipt parser remains strict and arbitrary prose never grants success.
+
+
+The observed native receipt corpus in `tests/fixtures/native-codex-corpus.json`
+covers 19 sign-offs, ten-character and full-head references, and the exact
+`View task →` link shape. Unknown closings, extra lines, unknown help text,
+foreign task links and mismatched heads cannot approve. A completed native code
+lifecycle with null finding flags is not an affirmative verdict: it may accompany
+an independently valid immutable receipt only when lifecycle creation precedes
+receipt creation, receipt creation does not follow code completion, and that
+completion follows the trusted request. Active security, mixed or true flags,
+unknown presentation, edited receipts and unpaired lifecycles remain pending.
+
+Strict positive receipt freshness and ordering use creation time; an edit cannot
+renew approval or outrank a later pending verdict. Unknown or negative receipt
+edits retain their update time so they can invalidate an older clean completion.
+
+A trusted exact-head clean formal review can also supersede strictly older
+pending summary evidence. Valid exact-head structured findings survive a repeated request for that head. Earlier valid section-specific clearing proof also remains effective when another section is absent or running, so repeated requests do not resurrect resolved findings; historical proof alone cannot grant the new request approval.
+Code findings require newer affirmative code proof; security findings require
+newer completed false/false security proof for that head (null is insufficient).
+Clearing checks exclude severity only inside the other section’s unique validated completed row; ambiguous global severity remains pending. Typed finding order uses the affected section’s canonical completion time; unrelated summary edits do not renew that finding, while explicit severity or failure presentation uses the update time. Negative facts require a canonical leading summary marker, closed typed state and summary heading, even when visual section rows or clocks are invalid; invalid or ambiguous clocks use the observation time. Trailing presentation, including quoted or fenced examples and extra markers, cannot erase those facts. Whole quoted or fenced envelopes, unknown or duplicate markers inside the leading envelope, malformed schemas and foreign-head state cannot become permanent vetoes. The entire native presentation must match the declared section rows, known triggers, optional native table header and exact known About help text before approval or section-clock authority. The older row-only native layout remains supported. Unknown text, including apparently harmless prose or Markdown examples, stays pending and keeps an explicit typed negative at its observation time. English finding inference is not an authority boundary. Clearing still validates the entire original body. A completed companion may predate this summary, including on an older head, but its completion cannot follow the server observation. A future companion keeps the affected negative at its observation time; a strictly newer canonical own-section clear can still recover.
+Explicit structured code/security findings require newer affirmative structured proof; a formal code review cannot clear them.
+Its submission time uses the same second buckets;
+tied or newer pending comments still block, and malformed receipt envelopes,
+native findings and unresolved threads retain their vetoes.
+
+A mutable summary updated in the request’s second remains ambiguous even if its
+original comment ID is lower: that ID dates creation, not the edit. Such ties
+stay pending; a fresh request or completion in a later second removes ambiguity.
+
+The visible code-review row must name the same head and a valid completion time
+strictly after the trusted request. Evidence order uses that code completion
+time, rather than summary `updated_at`, so a security-only edit cannot renew old
+code approval or supersede later receipt text. GitHub's second-precision comment
+times and subsecond completion rows use second buckets; ambiguous ties stay
+pending. Headings and reactions are not proof. Native P0–P2 findings, unresolved
+threads and malformed receipt envelopes retain their vetoes, including duplicate
+verdict/SHA fields, unknown markers, extra lines and explicit P0–P2 receipt
+findings. Any unrecognized summary presentation invalidates affirmative machine state. Reruns
+wait for active gates and coalesce events already read by a later attempt.
+
+While this contract upgrade is under review, the trusted default-branch gate
+still requires its accepted legacy receipt or native formal review. Request real
+review for the exact PR head and rerun the existing Actions gate if necessary.
+New presentation prose plus structured state cannot make the old parser accept
+an unsupported format. Do not execute proposed scripts with write permission,
+fabricate a status, or bypass a failed gate. Subsequent reviews use this contract
+only after it has been merged normally.
