@@ -988,13 +988,18 @@ function isRawHtmlRowContext(body, index, markdownOnly = false) {
   return Boolean(until || untilBlank || (!markdownOnly && containers.length));
 }
 
+// Fractional input must not extend the server observation into a later second.
+function observationSecondEnd(observed) {
+  return (Math.floor(observed / 1000) + 1) * 1000;
+}
+
 // Completion cannot predate the comment that carries it. GitHub timestamps
 // have second precision while rendered completion rows may include fractions.
 function completionWithinComment(comment, completed) {
   const created = Date.parse(comment.created_at || "");
   const observed = Date.parse(comment.updated_at || comment.created_at || "");
   return Number.isFinite(completed) && Number.isFinite(created) && Number.isFinite(observed) &&
-    Math.floor(completed / 1000) >= Math.floor(created / 1000) && completed <= observed + 999;
+    Math.floor(completed / 1000) >= Math.floor(created / 1000) && completed < observationSecondEnd(observed);
 }
 
 function codeReviewCompletedAt(body, headSha, section = "code_review") {
@@ -1076,7 +1081,7 @@ export function isAffirmativeCodexReviewState(comment, headSha, requestedAt, req
     const absent = (value) => closed(value) && Object.values(value).every((entry) => entry === null);
     const securityCompleted = codeReviewCompletedAt(body, headSha, "security_review");
     return complete(state.code_review) && ((absent(state.security_review) && !hasRenderedCodexSectionRow(body, "Security Review")) ||
-      (complete(state.security_review) && Number.isFinite(securityCompleted) && securityCompleted <= observed + 999));
+      (complete(state.security_review) && Number.isFinite(securityCompleted) && securityCompleted < observationSecondEnd(observed)));
   } catch { return false; }
 }
 
@@ -1114,7 +1119,7 @@ function typedCodexReviewState(comment, { negativeOnly = false } = {}) {
       if (negativeOnly || state[section].status !== "completed") continue;
       const completed = codeReviewCompletedAt(body, state[section].commit_sha, section);
       const observed = Date.parse(comment.updated_at || comment.created_at || "");
-      if (!Number.isFinite(completed) || !Number.isFinite(observed) || completed >= observed + 1000) return null;
+      if (!Number.isFinite(completed) || !Number.isFinite(observed) || completed >= observationSecondEnd(observed)) return null;
     }
     return state;
   } catch { return null; }
@@ -1152,7 +1157,7 @@ function isSectionClearingState(comment, section, headSha) {
     const running = body.replaceAll(" | 🔄 **Running** since <relative-time", " | ✅ **Completed** <relative-time");
     const started = codeReviewCompletedAt(running, state[otherSection].commit_sha, otherSection);
     const observed = Date.parse(comment.updated_at || comment.created_at || "");
-    if (!Number.isFinite(started) || !Number.isFinite(observed) || started >= observed + 1000) return false;
+    if (!Number.isFinite(started) || !Number.isFinite(observed) || started >= observationSecondEnd(observed)) return false;
   }
   let normalized = body.replace(encoded, JSON.stringify({ code_review: state[section], security_review: absent }))
     .split("\n").filter((line) => !line.startsWith(otherPrefix)).join("\n");
@@ -1169,7 +1174,7 @@ function findingCompletedAt(comment, section, headSha) {
   const companion = section === "code_review" ? "security_review" : "code_review";
   if (state[companion].status === "completed") {
     const completed = codeReviewCompletedAt(String(comment.body || ""), state[companion].commit_sha, companion);
-    if (!Number.isFinite(completed) || !Number.isFinite(observed) || completed >= observed + 1000) return observed;
+    if (!Number.isFinite(completed) || !Number.isFinite(observed) || completed >= observationSecondEnd(observed)) return observed;
   }
   const label = section === "code_review" ? "Code Review" : "Security Review";
   const ownRow = String(comment.body).split("\n").find(line => line.includes("**" + label + "**"));
@@ -1224,8 +1229,10 @@ function latestCodexCommentResult(comments, headSha, requestedAt, requestComment
     if (lifecycle && !paired) unpairedLifecycles.push(comment);
     return !paired;
   });
+  // A code-only lifecycle is retired by newer canonical code proof; the
+  // independent security finding remains governed by its own clear below.
   if (unpairedLifecycles.some(comment => !summaries.some(clear =>
-    isAffirmativeCodexReviewState(clear, headSha, requestedAt, requestCommentId) &&
+    isSectionClearingState(clear, "code_review", headSha) &&
     Math.floor(codeReviewCompletedAt(clear.body, headSha) / 1000) >
       Math.floor(Date.parse(comment.updated_at || comment.created_at || "") / 1000)))) return "pending";
   const candidates = [...usableSummaries, ...receipts];
