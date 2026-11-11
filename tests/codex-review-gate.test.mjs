@@ -280,6 +280,24 @@ const stateBody = `<!-- codex-pull-request-review-summary -->\n<!-- codex-review
   code_review: { commit_sha: headSha, has_any_findings: false, has_unresolved_findings: false, status: "completed" },
   security_review: { commit_sha: null, has_any_findings: null, has_unresolved_findings: null, status: null }
 })} -->\n\n## Codex Review Summary\n\n| 📝 **Code Review** | ✅ **Completed** <relative-time datetime="${answeredAt}">${answeredAt}</relative-time> | \`${headSha.slice(0, 7)}\` | Manual request |`;
+const currentDetailsStateBody = stateBody.replace(
+  "\n\n## Codex Review Summary\n\n",
+  "\n\n<details>\n<summary><strong>Codex Review Summary</strong>: ✅ Completed</summary>\n\n" +
+    "This comment shows the latest Codex review activity on this pull request.\n\n" +
+    "| Review | Status | Commit | Review trigger |\n| --- | --- | --- | --- |\n"
+) + `\n\n<details> <summary>ℹ️ About Codex in GitHub</summary>
+<br/>
+
+[Your team has set up Codex to review pull requests in this repo](https://chatgpt.com/codex/cloud/settings/general). Reviews are triggered when you
+- Open a pull request for review
+- Mark a draft as ready
+- Comment "@codex review" or "@codex security review".
+
+Codex reacts with 👀 while any review is running, comments if it has suggestions, and reacts with 👍 once all reviews finish with no findings.
+
+</details>
+
+</details>`;
 const summaryComment = (body = receiptBody) => ({
   id: 20, user: codexUser, body, created_at: answeredAt, updated_at: answeredAt
 });
@@ -299,6 +317,32 @@ test("real receipt and legacy answers pass, including native GitHub details", ()
     receiptBody + "\n\n" + "<details> <summary>ℹ️ About Codex in GitHub</summary>\n<br/>\n\n[Your team has set up Codex to review pull requests in this repo](https://chatgpt.com/codex/cloud/settings/general). Reviews are triggered when you\n- Open a pull request for review\n- Mark a draft as ready\n- Comment \"@codex review\".\n\nIf Codex has suggestions, it will comment; otherwise it will react with 👍.\n\n\n\n\nCodex can also answer questions or update the PR. Try commenting \"@codex address that feedback\".\n            \n</details>"]) {
     assert.equal(isAcceptableCodexSummaryComment(summaryComment(body), headSha, requestedAt, "10"), true);
     assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, summaryComment(body)] })), "pass");
+  }
+});
+
+test("the current collapsible native summary completes the reviewed head", () => {
+  const receipt = {
+    ...summaryComment(receiptBody),
+    created_at: "2026-10-15T20:00:59Z",
+    updated_at: "2026-10-15T20:00:59Z"
+  };
+  const current = {
+    ...summaryComment(currentDetailsStateBody),
+    id: 21,
+    created_at: "2026-10-15T20:00:05Z",
+    updated_at: "2026-10-15T20:01:01Z"
+  };
+  assert.equal(isAffirmativeCodexReviewState(current, headSha, requestedAt, "10"), true);
+  assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, receipt, current] })), "pass");
+
+  for (const body of [
+    currentDetailsStateBody.replace("✅ Completed</summary>", "🔄 Running</summary>"),
+    currentDetailsStateBody.replace(/<\/details>$/, ""),
+    currentDetailsStateBody.replace("<summary><strong>", "<summary>")
+  ]) {
+    const malformed = { ...current, body };
+    assert.equal(isAffirmativeCodexReviewState(malformed, headSha, requestedAt, "10"), false);
+    assert.equal(evaluateCodexReviewEvidence(evidence({ comments: [command, receipt, malformed] })), "pending");
   }
 });
 

@@ -865,7 +865,31 @@ function withoutNativeHelp(body) {
   if (!match || !NATIVE_HELP_TEXTS.has(match[1].replace(/\s+/g, " ").trim())) return null;
   return source.slice(0, index).trim();
 }
+
+/* The connector now wraps the same machine state and status table in a
+   collapsible summary. Normalize only that closed presentation back to the
+   established heading form; every schema, SHA, clock and finding check below
+   still runs on the normalized body. */
+function normalizeNativeSummaryDetails(body) {
+  const source = String(body || "").trim();
+  const envelope = source.match(/^( {0,3}<!-- codex-pull-request-review-summary -->\s*<!-- codex-review-state:v1 (\{[^\r\n]*\}) -->)\s*/);
+  if (!envelope) return source;
+  const details = source.slice(envelope[0].length).match(/^<details>\s*<summary><strong>Codex Review Summary<\/strong>:\s*(✅ Completed|🔄 Running)<\/summary>\s*([\s\S]*?)\s*<\/details>$/);
+  if (!details) return source;
+  try {
+    const state = JSON.parse(envelope[2]);
+    const statuses = [state.code_review?.status, state.security_review?.status]
+      .filter((status) => status !== null && status !== undefined);
+    const expected = statuses.length && statuses.every((status) => status === "completed")
+      ? "✅ Completed"
+      : statuses.some((status) => status === "running") ? "🔄 Running" : null;
+    if (details[1] !== expected) return source;
+  } catch { return source; }
+  return `${envelope[1]}\n\n## Codex Review Summary\n\n${details[2].trim()}`;
+}
+
 function isCanonicalCodexPresentation(body, state) {
+  body = normalizeNativeSummaryDetails(body);
   const envelope = String(body || "").match(/^ {0,3}<!-- codex-pull-request-review-summary -->\s*<!-- codex-review-state:v1 (\{[^\r\n]*\}) -->/);
   if (!envelope || !state) return false;
   const presentation = withoutNativeHelp(String(body).slice(envelope[0].length));
@@ -1003,6 +1027,7 @@ function completionWithinComment(comment, completed) {
 }
 
 function codeReviewCompletedAt(body, headSha, section = "code_review") {
+  body = normalizeNativeSummaryDetails(body);
   const renderedLabel = section === "security_review" ? "Security Review" : "Code Review";
   if (String(body).split("\n").filter((line) => hasRenderedCodexSectionRow(line, renderedLabel)).length !== 1) return NaN;
   body = body.replace(/\s*<details>\s*<summary>ℹ️ About Codex in GitHub<\/summary>[\s\S]*<\/details>\s*$/, "");
@@ -1050,7 +1075,7 @@ function hasCodeProtocolEnvelope(rawBody) {
 export function isAffirmativeCodexReviewState(comment, headSha, requestedAt, requestCommentId) {
   if (!isTrustedCodexLogin(comment?.user?.login) || !/^[a-f0-9]{40}$/.test(headSha)) return false;
   if (hasCodeProtocolEnvelope(String(comment?.body || ""))) return false;
-  const body = String(comment?.body || "").trim();
+  const body = normalizeNativeSummaryDetails(comment?.body);
   const match = body.match(/^<!-- codex-pull-request-review-summary -->\s*<!-- codex-review-state:v1 (\{[^\r\n]*\}) -->/);
   if (!match || !isCanonicalCodexPresentation(body, typedCodexReviewState(comment, { negativeOnly: true })) || (body.match(/<!--/g) || []).length !== 2 ||
       (body.match(/codex-review-state:/g) || []).length !== 1 ||
@@ -1090,8 +1115,8 @@ export function isAffirmativeCodexReviewState(comment, headSha, requestedAt, req
 function typedCodexReviewState(comment, { negativeOnly = false } = {}) {
   const rawBody = String(comment.body || "");
   if (hasCodeProtocolEnvelope(rawBody)) return null;
-  const body = rawBody.replace(/<!--([\s\S]*?)-->/g, (marker, content, index) =>
-    /^codex[-:]/i.test(content.trim()) && isProtocolCodeExample(rawBody, index) ? "" : marker).trim();
+  const body = normalizeNativeSummaryDetails(rawBody.replace(/<!--([\s\S]*?)-->/g, (marker, content, index) =>
+    /^codex[-:]/i.test(content.trim()) && isProtocolCodeExample(rawBody, index) ? "" : marker).trim());
   const envelope = body.replace(/<!--([\s\S]*?)-->/g, (marker, content) => /^codex[-:]/i.test(content.trim()) ? marker : "").trim();
   const match = envelope.match(/^<!-- codex-pull-request-review-summary -->\s*<!-- codex-review-state:v1 (\{[\s\S]*?\}) -->\s*## Codex Review Summary\b/);
   // Trailing presentation cannot erase proven negative facts. Clearing keeps
@@ -1131,7 +1156,7 @@ function isSectionClearingState(comment, section, headSha) {
   const state = typedCodexReviewState(comment);
   const originalBody = String(comment.body || "");
   if (!state || !isCanonicalCodexPresentation(originalBody, state)) return false;
-  const body = withoutNativeHelp(originalBody);
+  const body = withoutNativeHelp(normalizeNativeSummaryDetails(originalBody));
   const encodedMatch = body.match(/codex-review-state:v1 (\{[^\r\n]*\}) -->/);
   if (!encodedMatch) return false;
   const encoded = encodedMatch[1];
