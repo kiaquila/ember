@@ -72,11 +72,11 @@ ecosystem because action tags are not guaranteed to be semantic versions.
   1:1 (the client asked for it on 2026-11-19): "KS DESIGN" in tracked
   Manrope 700 caps, the cornflower gradient dot (`--brand-dot-a`/`-b`,
   indigo `#818cf8` into cyan `#22d3ee` at 135°, the portfolio's pair), and a
-  handwritten Caveat "art" tilted -5°, followed by the plain " · lab" tag
-  text, which stays. The logo is inline SVG outlines of those glyphs, not
-  text, so the page still ships no font; keep it outlines, and re-outline
+  handwritten Caveat "art" tilted -5°, with no lab suffix. The logo is inline
+  SVG outlines of those glyphs, not text, so the page still ships no font;
+  keep it outlines, and re-outline
   from the portfolio's fonts when its logo changes. It is used in the header
-  only, while the footer credit stays plain "ks-design" text; the centered
+  only, while the footer credit reads "ks-design.art"; the centered
   footer credit links to <https://ks-design.art>.
 - Audio must remain gesture-gated (autoplay policy) and fully silenced by
   mute; keep `prefers-reduced-motion` support working.
