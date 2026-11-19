@@ -182,15 +182,26 @@ test("both favicon fallbacks are declared", () => {
   assert.match(page, /rel="apple-touch-icon" href="apple-touch-icon\.png"/);
 });
 
-test("the wordmark stays two words for a screen reader", () => {
-  /* The brand dot is decorative; without a separator the mark fuses into one
-     announced word. The portfolio pins the same property. */
+test("the wordmark reads as the portfolio's name for a screen reader", () => {
+  /* The logo is drawn, so it is hidden from assistive tech and the name lives
+     in hidden text, announced the way the portfolio announces its own mark. */
   const mark = page.match(/<strong>[\s\S]*?<\/strong>/)[0];
-  assert.match(mark, /aria-hidden="true"/);
+  assert.match(mark, /<svg class="logo"[^>]*aria-hidden="true"/);
   assert.equal(
-    mark.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim(),
-    "ks design"
+    mark.replace(/<svg[\s\S]*?<\/svg>/g, "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim(),
+    "ks design.art"
   );
+});
+
+test("the logo is drawn, not typeset", () => {
+  /* The ks-design.art mark needs Manrope and Caveat; the study ships no font,
+     so the logo is outlines. A <text> element would fall back to a system
+     face and silently stop matching the portfolio. "lab" stays as plain
+     tag text after it. */
+  const mark = page.match(/<svg class="logo"[\s\S]*?<\/svg>/)[0];
+  assert.doesNotMatch(mark, /<text\b/);
+  assert.doesNotMatch(page, /@font-face/);
+  assert.match(page, /<\/strong> · lab<\/span>/);
 });
 
 test("the audio only ever starts from a gesture", () => {
