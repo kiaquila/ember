@@ -1,7 +1,12 @@
 # Third-party notices
 
-The study itself ships no third-party asset: system fonts, canvas 2D and
-synthesized audio only.
+The study itself ships no third-party asset or font file: system fonts,
+canvas 2D and synthesized audio only. The header logo is drawn as SVG
+outlines of glyphs from two typefaces licensed under the
+[SIL Open Font License 1.1](https://openfontlicense.org): Manrope
+(Copyright 2019 The Manrope Project Authors,
+<https://github.com/sharanda/manrope>) and Caveat (Copyright 2014 The Caveat
+Project Authors, <https://github.com/googlefonts/caveat>).
 
 The repository guard and the Codex review gate under `scripts/` were adapted by
 hand from the `kiaquila/web-design` template, whose repository-policy and

@@ -11,7 +11,8 @@ are documented in [`docs/stage-hosting.md`](docs/stage-hosting.md).
 ## Implementation
 
 - The artwork is one dependency-free page in `website/src/index.html`, with
-  inline CSS and JavaScript, Canvas 2D, Web Audio, and system fonts.
+  inline CSS and JavaScript, Canvas 2D, Web Audio, and system fonts. The
+  header logo is inline SVG outlines, so no font file is loaded.
 - Hover creates a local burn and recovery. Play runs one complete burn and
   rebirth cycle. Sound starts only after a user gesture and can be fully muted.
 - The build publishes exactly four allowlisted files and rejects unexpected

@@ -68,13 +68,16 @@ ecosystem because action tags are not guaranteed to be semantic versions.
   back the endless cycle repeat without the client asking); controls are
   play/stop and mute only; the
   favicon (inline SVG data URI + PNG fallbacks) inverts for dark color
-  schemes; the wordmark is "ks·design" in tracked caps with the cornflower
-  gradient dot on the baseline, hugging the KS with a wide gap before DESIGN
-  (`--brand-dot`, indigo `#818cf8` into cyan `#22d3ee` at 135°, same pair as
-  the ks portfolio's `--brand-dot`; the client swapped it in for the flat
-  brand-gold `#e8a038` on 2026-08-28), used in the header only,
-  while the footer credit stays plain "ks-design" text; the centered footer
-  credit links to <https://ks-design.art>.
+  schemes; the header wordmark is the ks-design.art portfolio logo ported
+  1:1 (the client asked for it on 2026-11-19): "KS DESIGN" in tracked
+  Manrope 700 caps, the cornflower gradient dot (`--brand-dot-a`/`-b`,
+  indigo `#818cf8` into cyan `#22d3ee` at 135°, the portfolio's pair), and a
+  handwritten Caveat "art" tilted -5°, followed by the plain " · lab" tag
+  text, which stays. The logo is inline SVG outlines of those glyphs, not
+  text, so the page still ships no font; keep it outlines, and re-outline
+  from the portfolio's fonts when its logo changes. It is used in the header
+  only, while the footer credit stays plain "ks-design" text; the centered
+  footer credit links to <https://ks-design.art>.
 - Audio must remain gesture-gated (autoplay policy) and fully silenced by
   mute; keep `prefers-reduced-motion` support working.
 - Before pushing: exercise hover, the full play cycle, stop, mute, and a
