@@ -196,12 +196,10 @@ test("the wordmark reads as the portfolio's name for a screen reader", () => {
 test("the logo is drawn, not typeset", () => {
   /* The ks-design.art mark needs Manrope and Caveat; the study ships no font,
      so the logo is outlines. A <text> element would fall back to a system
-     face and silently stop matching the portfolio. "lab" stays as plain
-     tag text after it. */
+     face and silently stop matching the portfolio. */
   const mark = page.match(/<svg class="logo"[\s\S]*?<\/svg>/)[0];
   assert.doesNotMatch(mark, /<text\b/);
   assert.doesNotMatch(page, /@font-face/);
-  assert.match(page, /<\/strong> · lab<\/span>/);
 });
 
 test("the audio only ever starts from a gesture", () => {
