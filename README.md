@@ -12,10 +12,10 @@ are documented in [`docs/stage-hosting.md`](docs/stage-hosting.md).
 
 - The artwork is one dependency-free page in `website/src/index.html`, with
   inline CSS and JavaScript, Canvas 2D, Web Audio, and system fonts. The
-  header logo is inline SVG outlines, so no font file is loaded.
+  header logo uses the canonical KS SVG export, so no font file is loaded.
 - Hover creates a local burn and recovery. Play runs one complete burn and
   rebirth cycle. Sound starts only after a user gesture and can be fully muted.
-- The build publishes exactly four allowlisted files and rejects unexpected
+- The build publishes exactly six allowlisted files and rejects unexpected
   files and off-origin references. The Cloudflare Worker serves them with
   security headers.
 - User-facing motion honors `prefers-reduced-motion`, and the controls use
@@ -107,3 +107,10 @@ New presentation prose plus structured state cannot make the old parser accept
 an unsupported format. Do not execute proposed scripts with write permission,
 fabricate a status, or bypass a failed gate. Subsequent reviews use this contract
 only after it has been merged normally.
+
+## Shared logo assets
+
+The header uses the canonical outlined `ks-design.art` SVG from `kiaquila/ks`,
+at 121 × 20 CSS pixels on desktop and mobile. Both theme exports are copied
+without edits; white ink is used on dark surfaces. The dot stays unchanged.
+See `docs/logo-assets.json` for source paths and SHA-256 hashes.

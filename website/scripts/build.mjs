@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /* Static build. The study is one self-contained HTML file plus the two baked
-   favicon PNGs Safari needs and the baked social card, so the build copies
+   favicon PNGs Safari needs, the baked social card and the two canonical logo SVGs, so the build copies
    rather than compiles - and then checks the two properties the project
    promises, because a page that quietly grew a CDN link or lost its favicon
    would still "build" fine.
@@ -16,7 +16,7 @@ const src = join(root, "src");
 const dist = join(root, "dist");
 
 /** Everything the Worker serves. A file outside this list is not published. */
-const SERVED = ["index.html", "favicon-32.png", "apple-touch-icon.png", "og.png"];
+const SERVED = ["ks-design-art-on-light.svg", "ks-design-art-on-dark.svg", "index.html", "favicon-32.png", "apple-touch-icon.png", "og.png"];
 
 /* Social scrapers ignore relative URLs, so the og:url/og:image meta tags have
    to spell out the page's own address in full. Those two URLs are enumerated
