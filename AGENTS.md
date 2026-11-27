@@ -74,7 +74,7 @@ ecosystem because action tags are not guaranteed to be semantic versions.
   Manrope 700 caps, the cornflower gradient dot (`--brand-dot-a`/`-b`,
   indigo `#818cf8` into cyan `#22d3ee` at 135°, the portfolio's pair), and a
   handwritten Caveat "art" tilted -5°, with no lab suffix. The logo uses the canonical external SVG exports from KS (2026-11-27),
-  with the corrected `KS-DESIGN.art` lettering at 121 × 20 CSS px on every
+  with the restored `KS DESIGN.art` lettering at 118 × 20 CSS px on every
   viewport. Copy the exports unchanged; do not re-outline or recolour them. It is used in the header
   only, while the footer credit reads "ks-design.art"; the centered
   footer credit links to <https://ks-design.art>.

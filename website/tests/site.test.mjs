@@ -186,7 +186,7 @@ test("both favicon fallbacks are declared", () => {
 
 test("the wordmark uses the accessible canonical SVG", () => {
   const mark = page.match(/<strong>[\s\S]*?<\/strong>/)[0];
-  assert.match(mark, /<img class="logo" src="\/ks-design-art-on-light\.svg" alt="ks-design\.art" width="121" height="20">/);
+  assert.match(mark, /<img class="logo" src="\/ks-design-art-on-light\.svg" alt="ks design\.art" width="118" height="20">/);
   assert.doesNotMatch(mark, /<svg|<text/);
   assert.doesNotMatch(page, /@font-face/);
 });
