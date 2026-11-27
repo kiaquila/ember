@@ -23,7 +23,7 @@ test("the study ships as one page, its two favicons and the social card", async 
      read, one file to host. A build that started emitting a bundle would have
      quietly changed what this project is. */
   const files = (await readdir(dist)).sort();
-  assert.deepEqual(files, ["apple-touch-icon.png", "favicon-32.png", "index.html", "og.png"]);
+  assert.deepEqual(files, ["apple-touch-icon.png", "favicon-32.png", "index.html", "ks-design-art-on-dark.svg", "ks-design-art-on-light.svg", "og.png"]);
   for (const name of files) {
     const info = await stat(join(dist, name));
     assert.ok(info.size > 0, `${name} is empty`);
@@ -53,10 +53,12 @@ const BUDGETS = {
   "index.html": 40 * 1024,
   "favicon-32.png": 2 * 1024,
   "apple-touch-icon.png": 8 * 1024,
+  "ks-design-art-on-light.svg": 16 * 1024,
+  "ks-design-art-on-dark.svg": 16 * 1024,
   "og.png": 1024 * 1024
 };
 
-test("the four published files stay inside their size budgets", async () => {
+test("the published files stay inside their size budgets", async () => {
   for (const [name, budget] of Object.entries(BUDGETS)) {
     const { size } = await stat(join(dist, name));
     assert.ok(size <= budget, `${name} is ${size} bytes, budget ${budget}`);
@@ -182,23 +184,10 @@ test("both favicon fallbacks are declared", () => {
   assert.match(page, /rel="apple-touch-icon" href="apple-touch-icon\.png"/);
 });
 
-test("the wordmark reads as the portfolio's name for a screen reader", () => {
-  /* The logo is drawn, so it is hidden from assistive tech and the name lives
-     in hidden text, announced the way the portfolio announces its own mark. */
+test("the wordmark uses the accessible canonical SVG", () => {
   const mark = page.match(/<strong>[\s\S]*?<\/strong>/)[0];
-  assert.match(mark, /<svg class="logo"[^>]*aria-hidden="true"/);
-  assert.equal(
-    mark.replace(/<svg[\s\S]*?<\/svg>/g, "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim(),
-    "ks design.art"
-  );
-});
-
-test("the logo is drawn, not typeset", () => {
-  /* The ks-design.art mark needs Manrope and Caveat; the study ships no font,
-     so the logo is outlines. A <text> element would fall back to a system
-     face and silently stop matching the portfolio. */
-  const mark = page.match(/<svg class="logo"[\s\S]*?<\/svg>/)[0];
-  assert.doesNotMatch(mark, /<text\b/);
+  assert.match(mark, /<img class="logo" src="\/ks-design-art-on-light\.svg" alt="ks-design\.art" width="121" height="20">/);
+  assert.doesNotMatch(mark, /<svg|<text/);
   assert.doesNotMatch(page, /@font-face/);
 });
 

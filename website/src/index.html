@@ -69,8 +69,7 @@
     color: var(--muted);
   }
   .tag strong { color: var(--ink); font-weight: 600; }
-  /* The drawn logo is decorative, so the wordmark's accessible name lives in
-     hidden text - "ks design.art", read the way the portfolio announces it. */
+  /* The image alt text carries the canonical accessible brand name. */
   .visually-hidden {
     position: absolute;
     width: 1px;
@@ -81,26 +80,8 @@
     clip-path: inset(50%);
     white-space: nowrap;
   }
-  /* The ks-design.art logo, ported 1:1: the portfolio's Manrope 700 caps at
-     0.78rem with 0.14em tracking, the gradient dot, and the Caveat 600 "art"
-     at 1.95em turned -5deg - outlined from the portfolio's own fonts at the
-     pen positions Chrome lays them out at, so the page still loads no font.
-     The viewBox is in tenths of a px at the 0.78rem size (124.8 units per
-     em) and ends where the portfolio's layout box does; its bottom sits
-     0.05em below the baseline. The tilted "t" overhangs that box by about
-     0.17em, so the right margin reserves space for that overhang. */
-  .logo {
-    display: inline-block;
-    font-size: 0.78rem;
-    width: 9.15em;
-    height: 1.35em;
-    margin-right: 0.2em;
-    vertical-align: -0.05em;
-    overflow: visible;
-    fill: currentColor;
-  }
-  .logo stop:first-child { stop-color: var(--brand-dot-a); }
-  .logo stop:last-child { stop-color: var(--brand-dot-b); }
+  /* Canonical KS outlines: one size on desktop and phones. */
+  .logo { display: block; width: 121px; height: 20px; max-width: none; flex-shrink: 0; }
   .bottom {
     bottom: 0;
     flex-direction: column;
@@ -171,7 +152,7 @@
 <canvas id="scene" aria-label="A dark wireframe figure smoldering with golden embers. Hovering makes it burn locally and recover; play burns it down completely before it reassembles into a new figure."></canvas>
 
 <header class="chrome top">
-  <span class="tag"><strong><svg class="logo" viewBox="0 -162.24 1141.92 168.48" aria-hidden="true" focusable="false"><linearGradient id="brand-dot" x1="0" y1="0" x2="1" y2="1"><stop offset="0"></stop><stop offset="1"></stop></linearGradient><path d="m9 0v-90h15v42l36-42h18l-39 44 42 46h-19l-38-42v42zm127 2q-9 0-17-4-8-3-13-9-5-7-7-16l16-2q2 8 8 12 6 5 14 5 5 0 9-2 5-1 7-4 3-3 3-7 0-2-1-4 0-1-1-2-2-2-4-3-1-1-4-2l-23-6q-3-1-7-3-3-1-6-4-3-2-5-6-2-4-2-10 0-9 4-15 5-6 12-9 7-3 17-3 9 0 16 4 7 3 12 9 5 5 7 14l-16 2q-1-4-4-8-3-3-7-5-4-1-9-2-4 0-8 2-4 1-6 4-2 2-2 6 0 3 2 5 2 2 5 4 2 1 6 2l16 4q3 1 7 3 4 1 8 4 4 2 6 7 3 4 3 11 0 7-3 12-3 5-8 9-5 3-11 5-7 2-14 2zm109-2v-90h29q1 0 4 0 4 0 7 1 10 1 18 7 7 6 11 16 4 10 4 21 0 11-4 21-4 10-11 16-8 6-18 8-3 0-7 0-3 0-4 0zm15-14h14q2 0 5 0 2 0 5-1 6-1 10-6 4-4 6-10 2-7 2-14 0-7-2-14-2-6-6-10-4-5-10-6-3-1-5-1-3 0-5 0h-14zm90 14v-90h58v14h-43v22h36v15h-36v25h43v14zm123 2q-10 0-18-4-8-3-13-9-5-7-6-16l15-2q2 8 9 12 6 5 14 5 5 0 9-2 4-1 7-4 3-3 3-7 0-2-1-4-1-1-2-2-1-2-3-3-2-1-4-2l-24-6q-3-1-6-3-4-1-7-4-3-2-5-6-2-4-2-10 0-9 5-15 4-6 12-9 7-3 16-3 9 0 17 4 7 3 12 9 5 5 7 14l-17 2q-1-4-3-8-3-3-7-5-4-1-9-2-5 0-8 2-4 1-7 4-2 2-2 6 0 3 2 5 2 2 5 4 3 1 6 2l16 4q3 1 8 3 4 1 8 4 3 2 6 7 2 4 2 11 0 7-3 12-3 5-7 9-5 3-12 5-6 2-13 2zm68-2v-90h15v90zm88 2q-9 0-17-3-7-3-13-9-6-6-9-15-3-9-3-20 0-15 5-25 6-11 15-16 10-6 22-6 16 0 26 8 10 8 13 22l-15 2q-3-8-8-13-6-5-15-5-9 0-15 4-6 4-9 12-3 7-3 17 0 10 3 17 3 7 9 12 6 4 15 4 7 0 12-3 5-2 8-7 3-6 4-13h-15v-12h31q0 1 1 3 0 2 0 2 0 13-5 23-5 10-15 15-9 6-22 6zm72-2v-90h15l41 63v-63h16v90h-16l-41-63v63zm200-4q-1-2-4-4-2-1-3-2 0-1-1-3 0-1-1-2-2-1 0-7 1-6 4-14 3-9 7-17 1-3 3-6 2-3 3-4 0-1 0-2 1-1 2-1l1-3q0-1 2-5 2-3 6-7 3-3 6-7 4-3 6-5 5-4 10-4 6-1 10 2 1 0 3 2 3 2 6 4 3 3 6 5l9 7-3 12q-2 10 0 17 2 7 6 13 1 2 4 4 3 1 6 1 2 1 4 2 2 1 2 3 0 5-1 7-2 3-4 3-8 2-15-1-8-3-15-13-1-2-3-5-2-4-2-6-1 2-2 4-2 3-4 4-15 19-27 26-12 6-21 2zm11-19q1 0 5-2 4-2 9-8 8-7 14-14 6-6 10-14l5-9q-3-6-6-7-2-2-4-2-3 1-8 6-4 5-9 14-6 8-11 20-3 6-4 11-1 5-1 5zm97 8q-2-1-5-3-2-2-1-7 0-7 0-13 1-5 2-12 1-3 2-10 1-7 4-16 2-8 5-16 2-8 4-11 3-3 7-3 5 0 7 1 3 2 2 8-1 6-6 17-1 5-3 8-1 4-1 5-1 2 1 1 1-3 5-6 3-4 7-8 4-4 8-7 4-3 5-4 2-1 4-2 3-1 4-2 5-3 12-3 6 0 8 4 0 2 2 2 1 1 1 1 1 0 1 1 0 1 0 1 1 1-2 4-3 2-7 3-3 1-5 2-3 1-6 3-9 6-16 11-8 5-15 14-1 2-3 4-1 3-3 6-1 1-2 5-1 5-1 8-1 4-1 5 0 0 0 2-1 3-2 5-3 4-5 5-3 1-7-3zm114-2q-3 0-6-2-3-2-7-5-4-3-5-6-2-4-2-8-1-5-2-12 0-3 1-8 0-6 1-12 1-6 2-11 1-5 1-6 0-3-3-4-3 0-7 1-4 0-5 0-1-1-1-2 0-2 0-2 0-1-1-1-1-1-2-2 0-1 1-3 1-3 4-4 2 0 6-1 5-1 9-2 4-2 6-5 2-6 4-12 2-7 4-12 2-5 3-6 4-3 8-3 3 0 6 4 1 2 2 2 1 1 1 3 0 1-2 5-1 4-5 13-1 2-1 4-1 2-1 2 1 0 3 0 2 0 5-1 2-1 6-1 3-1 5-1 6 0 9 2 3 3 3 8 1 3-1 4-2 2-8 2-2 1-7 1-4 1-8 1-5 1-8 2-4 0-4 1 0 0-1 4-2 4-3 9-1 5-2 9-1 8-1 16 0 8 1 14 1 6 4 8 2 2 7 0 5-3 8-6 5-4 8-4 3 1 4 4 1 4-2 9-3 4-7 8-5 4-10 5-6 2-10 1z"></path><circle cx="826" cy="-25" r="25" fill="url(#brand-dot)"></circle></svg><span class="visually-hidden">ks design.art</span></strong></span>
+  <span class="tag"><strong><img class="logo" src="/ks-design-art-on-light.svg" alt="ks-design.art" width="121" height="20"></strong></span>
   <span class="tag">study 01 · ember</span>
 </header>
 
